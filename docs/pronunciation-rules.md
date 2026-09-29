@@ -1,0 +1,11 @@
+# Stage 1 pronunciation rules
+
+Before any Jyutping lookup, the input is split into nonseparator spans and individual separators. Separators are Unicode punctuation or whitespace, including ASCII and fullwidth forms; Unicode symbols are processed as ordinary text. Longest matching runs only within a nonseparator span, so no dictionary word crosses a separator. A matching word receives one Jyutping syllable per character. Multiple readings are scored by summing each character's count for its candidate syllable in `charlist.json`; equal scores use the first CSV reading. A character without a word match uses its highest-count character reading, with JSON source order breaking ties.
+
+Both routes expose the same lookup as per-character arrays and grouped arrays. `words` preserves matched dictionary words; fallback characters, punctuation, and whitespace are individual groups. `jyutpin_words` joins a group's syllables with spaces and uses `null` where no reading exists. `/approx_pinyin` also returns `approx_pinyin_words`, using `null` for the whole group if any syllable has no approximation. `hint` remains per character.
+
+Approximate pinyin follows [`粵普拼音對照.md`](../粵普拼音對照.md) where the two guides disagree, then [`粵拼轉近似普通話拼音完整靜態映射表.md`](../粵拼轉近似普通話拼音完整靜態映射表.md). The six Jyutping tones map to Mandarin tone digits `1, 2, 1, 3, 2, 4`. The guide's optional fourth-tone alternative for Jyutping tone 3 is resolved to tone 1. A stop final `-p`, `-t`, or `-k` becomes an apostrophe immediately before the tone digit, as in `baat3 → ba'1`.
+
+The conversion uses the guide's explicit example syllables where its general initial and final rows offer competing results, then a fixed final table for other syllables. For example, `hoeng1 → xiang1`, `seon3 → xin1`, and `syut3 → xue'1`. The approximation describes a sound cue; it is not a Mandarin dictionary reading of the character. Unsupported or malformed syllables have `null` approximation and hint. Special pronunciation cues include throat `h`, velar `ng`, rounded vowels or initials, lip-closing `-m`, and short stop finals.
+
+The cache stores versioned compressed JSON, including source hashes, double-array `base` and `check` arrays, terminal syllables, and character counts. A changed source or unreadable cache is rebuilt at startup. Configure a writable cache path in restricted deployments.

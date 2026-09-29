@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "yen2pinyin"
+version = "0.1.0"
+description = "Static Cantonese Jyutping and Mandarin approximation API"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115",
+  "pydantic>=2.10",
+  "pydantic-settings>=2.7",
+  "PyYAML>=6.0",
+  "uvicorn>=0.34",
+]
+
+[project.optional-dependencies]
+test = ["httpx>=0.28", "pytest>=8.3"]
+
+[tool.setuptools.packages.find]
+include = ["yen2pinyin*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

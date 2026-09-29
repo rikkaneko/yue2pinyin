@@ -1,0 +1,7 @@
+.env
+.venv
+.git
+reports
+__pycache__
+.pytest_cache
+jyutping.dat
