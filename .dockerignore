@@ -4,4 +4,6 @@
 reports
 __pycache__
 .pytest_cache
+.pnpm-store
+frontend
 jyutping.dat

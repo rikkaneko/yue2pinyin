@@ -1,0 +1,178 @@
+.sidebar {
+  width: 260px;
+  flex: 0 0 260px;
+}
+
+.brand-mark {
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  font-size: 1.35rem;
+}
+
+.sidebar .nav-link {
+  text-align: left;
+}
+
+.main-content {
+  min-width: 0;
+}
+
+.topbar {
+  min-height: 72px;
+}
+
+.view-panel[hidden] {
+  display: none;
+}
+
+.status-message {
+  min-height: 1.5rem;
+}
+
+.status-message.error {
+  color: var(--bs-danger);
+}
+
+/* Fixed rows align all word groups while the sentence scrolls as one line. */
+.word-grid {
+  line-height: 1.3;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.word-grid::-webkit-scrollbar {
+  display: none;
+}
+
+.word-card {
+  display: grid;
+  grid-template-rows: 1.4rem 1.4rem 2.1rem 1.5rem;
+  align-items: center;
+  justify-items: center;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.word-card .hanzi,
+.word-card .word-trigger {
+  display: inline-block;
+  grid-row: 3;
+  align-self: start;
+  height: 2.1rem;
+  font-size: 1.4rem;
+  line-height: 2.1rem;
+  white-space: pre;
+}
+
+.word-card .word-trigger {
+  border: 0;
+  text-decoration: none;
+  touch-action: pan-y;
+}
+
+.word-card .word-label {
+  text-decoration: underline;
+  text-underline-offset: .12em;
+}
+
+.word-card .word-trigger::after {
+  content: 'ⓘ';
+  display: inline-block;
+  margin-left: .25rem;
+  font-size: .75rem;
+  line-height: 1;
+  text-decoration: none;
+  vertical-align: middle;
+}
+
+.word-card .approx,
+.word-card .jyutpin {
+  white-space: pre;
+}
+
+.word-card .approx {
+  grid-row: 1;
+}
+
+.word-card .jyutpin {
+  grid-row: 2;
+}
+
+.word-card .speak-word {
+  grid-row: 4;
+}
+
+.word-hint-box {
+  position: fixed;
+  z-index: 30;
+  width: max-content;
+  max-width: min(18rem, 80vw);
+}
+
+.word-hint-box p:last-child {
+  margin-bottom: 0 !important;
+}
+
+.hint-dialog {
+  width: min(28rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+}
+
+.hint-dialog::backdrop {
+  background: rgb(0 0 0 / 50%);
+}
+
+.field-list {
+  display: grid;
+  grid-template-columns: minmax(90px, 140px) minmax(0, 1fr);
+  gap: 8px 14px;
+  margin: 0;
+}
+
+.field-list dt {
+  font-weight: 500;
+}
+
+.field-list dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.language-line {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.language-line strong {
+  margin-right: 8px;
+}
+
+@media (max-width: 991px) {
+  .sidebar {
+    position: fixed;
+    z-index: 20;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    transform: translateX(-100%);
+    transition: transform .2s ease;
+    box-shadow: var(--bs-box-shadow);
+  }
+
+  .sidebar.is-open {
+    transform: translateX(0);
+  }
+}
+
+@media (max-width: 575px) {
+  .field-list {
+    grid-template-columns: 1fr;
+    gap: 3px;
+  }
+
+  .field-list dd {
+    margin-bottom: 9px;
+  }
+}
