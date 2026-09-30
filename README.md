@@ -1,4 +1,4 @@
-# Cantonese Tutor
+# Yen2Pinyin
 
 FastAPI service for Cantonese pronunciation and Words.hk flashcards, with a separately hosted static frontend. Pronunciation uses the checked-in dictionaries and mapping guides.
 
@@ -13,7 +13,7 @@ cp -n .env.example .env;
 .venv/bin/uvicorn yen2pinyin.api:app --host 127.0.0.1 --port 8000
 ```
 
-At startup, the app reads `.env` from its current working directory if present. The copy command above leaves an existing `.env` untouched. Process environment variables take precedence over `.env`; missing settings use the defaults below. The example file sets the cache to `./jyutping.dat`, which is ignored by Git. The first startup compiles the word dictionary into a double-array trie. Later starts reuse a compressed cache when the word CSV and character frequency JSON are unchanged.
+At startup, the app reads `.env` from its current working directory if present. The copy command above leaves an existing `.env` untouched. Process environment variables take precedence over `.env`; missing settings use the defaults below. The example file sets the cache to `./jyutping.dat`, which is ignored by Git. The first startup compiles Rime words and Words.hk headword readings into a double-array trie. Later starts reuse a compressed cache when the word CSV, character frequency JSON, and flashcard YAML are unchanged.
 
 The API serves `/jyutpin`, `/approx_pinyin`, and `/word`; it does not serve the frontend. Set `YEN2PINYIN_CORS_ORIGINS=http://localhost:8080` in `.env` before starting it, then serve `frontend/` from another terminal:
 
@@ -37,7 +37,7 @@ Compose passes the `YEN2PINYIN_*` values from `.env` into the container. The ser
 | `YEN2PINYIN_WORDS_PATH` | `assests/rime-cantonese/jyut6ping3.words.dict.csv` within the package project | Word dictionary |
 | `YEN2PINYIN_CHARACTERS_PATH` | `assests/words-hk/charlist.json` within the package project | Character pronunciation counts |
 | `YEN2PINYIN_CACHE_PATH` | `/tmp/yen2pinyin/jyutping.dat` | Writable compiled-trie cache |
-| `YEN2PINYIN_FLASHCARD_WORDS_PATH` | `assests/words-hk/all-latest.yaml` within the package project | Words.hk flashcard source |
+| `YEN2PINYIN_FLASHCARD_WORDS_PATH` | `assests/words-hk/all-latest.yaml` within the package project | Words.hk flashcard and pronunciation source |
 | `YEN2PINYIN_CORS_ORIGINS` | empty | Comma-separated allowed frontend origins; empty denies cross-origin browser requests |
 
 CORS entries can be exact HTTP(S) origins (`https://app.nekoid.cc`), subdomains (`https://*.nekoid.cc`), or a host with any explicit numeric port (`http://localhost:*`). A subdomain wildcard excludes the root domain. List the root separately when needed. Paths, query strings, malformed hosts, and invalid fixed ports fail validation at process start. Cross-origin `GET`, `POST`, and `Content-Type` preflight requests are supported without credentials. Restart the API after changing this setting.
@@ -47,7 +47,7 @@ CORS entries can be exact HTTP(S) origins (`https://app.nekoid.cc`), subdomains 
 - Input segmentation at Unicode punctuation and whitespace before longest-word Jyutping matching, including ASCII and fullwidth forms.
 - Character pronunciation fallback selected by frequency.
 - Deterministic approximate Mandarin pinyin and concise sound cues.
-- Per-character JSON arrays retaining punctuation and unknown characters.
+- Parallel text-unit arrays retaining punctuation and unknown characters, with each Latin word in one unit.
 - Word-group arrays that preserve dictionary matches and cover the full input.
 - A standalone converter for the multiline words.hk CSV, with structured YAML output.
 - Uniform random flashcards selected from entries with a substantive Cantonese example.
@@ -59,13 +59,14 @@ CORS entries can be exact HTTP(S) origins (`https://app.nekoid.cc`), subdomains 
 ```sh
 curl -X POST http://127.0.0.1:8000/jyutpin -H 'Content-Type: application/json' -d '{"text":"你好，龘"}'
 curl -X POST http://127.0.0.1:8000/approx_pinyin -H 'Content-Type: application/json' -d '{"text":"你好，龘"}'
+curl -X POST http://127.0.0.1:8000/approx_pinyin -H 'Content-Type: application/json' -d '{"jyutpin":["nei5",["so1","wi4"],null]}'
 curl http://127.0.0.1:8000/word
 .venv/bin/python -m pytest -q
 ```
 
-Both routes return one `text` entry per Unicode character and add parallel `words` and `jyutpin_words` arrays. A dictionary match stays grouped, while fallback characters, punctuation, and whitespace each form one group. Grouped syllables are joined with spaces, for example `"你好"` with `"nei5 hou2"`. Missing readings are `null` in both per-character and grouped arrays.
+For `{ "text": "..." }`, both pronunciation routes return parallel text-unit and reading arrays. Cantonese characters, punctuation, and whitespace occupy one unit each; a contiguous Latin word such as `sorry` occupies one unit and retains its input case. `words` and `jyutpin_words` group dictionary matches. Rime readings take precedence; valid Words.hk headword readings fill missing words. Latin matching ignores case. A multi-syllable Latin reading occupies one nested array, so `sorry囉` returns `text: ["sorry", "囉"]` and `jyutpin: [["so1", "wi4"], "lo3"]`. Single-syllable readings remain strings; missing readings are `null`.
 
-`/approx_pinyin` adds per-character `approx_pinyin` and `hint`, plus `approx_pinyin_words`. A grouped approximation is `null` if any syllable in its group is unsupported. An ordinary sound has an empty hint string. See [pronunciation rules](docs/pronunciation-rules.md) for mapping details.
+For text input, `/approx_pinyin` adds per-unit `approx_pinyin` and `hint`, plus `approx_pinyin_words`. Nested Latin readings convert syllable by syllable, preserving positions with `null` for unsupported syllables; for `sorry囉`, `approx_pinyin` is `[["so1", "wi3"], "lo1"]`. A grouped Cantonese approximation remains `null` if any unit is unsupported. An ordinary sound has an empty hint string. Alternatively, `{ "jyutpin": ["nei5", ["so1", "wi4"], null] }` converts readings directly and returns only `jyutpin`, `approx_pinyin`, and `hint` arrays. Existing space-separated strings such as `"so1 wi4"` remain accepted and return nested arrays. Explicit nested arrays retain their shape, including one-syllable arrays. Empty or null elements have null approximation and hint. See [pronunciation rules](docs/pronunciation-rules.md) for mapping details.
 
 Each API worker keeps separate in-memory LRU caches of the latest 1,000 exact input texts for Jyutpin and approximate-pinyin responses. An approximate-pinyin cache miss reuses the Jyutpin result cache. These query caches start empty on worker startup and are not shared across workers; the compiled dictionary cache described above remains on disk.
 

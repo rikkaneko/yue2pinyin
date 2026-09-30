@@ -14,7 +14,10 @@ from pydantic import ValidationError, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from yen2pinyin.approximation import approximate
-from yen2pinyin.contracts import ApproxPinyinResponse, JyutpinResponse, TextRequest, WordDocument, WordEntry
+from yen2pinyin.contracts import (
+  ApproximationValue, ApproxPinyinResponse, DirectApproxPinyinResponse, JyutpinRequest,
+  JyutpinResponse, JyutpinValue, TextRequest, WordDocument, WordEntry,
+)
 from yen2pinyin.trie import PronunciationTrie
 
 
@@ -66,6 +69,7 @@ class WordCatalog:
     except (OSError, yaml.YAMLError, ValidationError) as error:
       raise RuntimeError(f"Cannot load flashcard words from {source}: {error}") from error
 
+    self.all_entries = document.entries
     self.entries = tuple(
       entry for entry in document.entries
       if any(
@@ -81,10 +85,11 @@ class WordCatalog:
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
   # Resolve the optional dotenv file at startup, using the process working directory.
   settings = Settings(_env_file=Path.cwd() / ".env")
+  app.state.word_catalog = WordCatalog(settings.flashcard_words_path)
   app.state.trie = PronunciationTrie.load_or_build(
     settings.words_path, settings.characters_path, settings.cache_path,
+    settings.flashcard_words_path, app.state.word_catalog.all_entries,
   )
-  app.state.word_catalog = WordCatalog(settings.flashcard_words_path)
   # Query results live with this trie instance and are discarded at worker restart.
   app.state.jyutpin_cache = OrderedDict()
   app.state.approx_pinyin_cache = OrderedDict()
@@ -136,7 +141,7 @@ async def jyutpin(payload: TextRequest, request: Request) -> JyutpinResponse:
   # Keep per-character and word-group results from the same longest-match pass.
   lookup = request.app.state.trie.annotate(payload.text)
   result = JyutpinResponse(
-    text=list(payload.text),
+    text=lookup.text,
     jyutpin=lookup.jyutpin,
     words=lookup.words,
     jyutpin_words=lookup.jyutpin_words,
@@ -147,8 +152,36 @@ async def jyutpin(payload: TextRequest, request: Request) -> JyutpinResponse:
   return result
 
 
-@app.post("/approx_pinyin", response_model=ApproxPinyinResponse)
-async def approx_pinyin(payload: TextRequest, request: Request) -> ApproxPinyinResponse:
+@app.post("/approx_pinyin", response_model=ApproxPinyinResponse | DirectApproxPinyinResponse)
+async def approx_pinyin(
+  payload: TextRequest | JyutpinRequest, request: Request,
+) -> ApproxPinyinResponse | DirectApproxPinyinResponse:
+  if isinstance(payload, JyutpinRequest):
+    normalized: list[JyutpinValue] = []
+    converted: list[ApproximationValue] = []
+    hints: list[ApproximationValue] = []
+    for reading in payload.jyutpin:
+      syllables = reading.split() if isinstance(reading, str) else reading
+      if syllables is None:
+        normalized.append(None)
+        converted.append(None)
+        hints.append(None)
+      elif not syllables:
+        normalized.append(reading)
+        converted.append(None)
+        hints.append(None)
+      elif isinstance(reading, list) or len(syllables) > 1:
+        normalized.append(syllables)
+        approximations = [approximate(syllable) for syllable in syllables]
+        converted.append([item[0] for item in approximations])
+        hints.append([item[1] for item in approximations])
+      else:
+        normalized.append(reading)
+        approximation, hint = approximate(syllables[0])
+        converted.append(approximation)
+        hints.append(hint)
+    return DirectApproxPinyinResponse(jyutpin=normalized, approx_pinyin=converted, hint=hints)
+
   cache: OrderedDict[str, ApproxPinyinResponse] = request.app.state.approx_pinyin_cache
   cached = cache.get(payload.text)
   if cached is not None:
@@ -161,7 +194,7 @@ async def approx_pinyin(payload: TextRequest, request: Request) -> ApproxPinyinR
   if jyutpin_result is None:
     lookup = request.app.state.trie.annotate(payload.text)
     jyutpin_result = JyutpinResponse(
-      text=list(payload.text),
+      text=lookup.text,
       jyutpin=lookup.jyutpin,
       words=lookup.words,
       jyutpin_words=lookup.jyutpin_words,
@@ -173,23 +206,42 @@ async def approx_pinyin(payload: TextRequest, request: Request) -> ApproxPinyinR
     jyutpin_cache.move_to_end(payload.text)
     jyutpin_result = jyutpin_result.model_copy(deep=True)
 
-  converted = [approximate(syllable) if syllable is not None else (None, None) for syllable in jyutpin_result.jyutpin]
-  per_character = [item[0] for item in converted]
-  grouped: list[str | None] = []
+  converted: list[tuple[ApproximationValue, ApproximationValue]] = []
+  for reading in jyutpin_result.jyutpin:
+    if reading is None:
+      converted.append((None, None))
+    elif isinstance(reading, list):
+      approximations = [approximate(syllable) for syllable in reading]
+      converted.append(([item[0] for item in approximations], [item[1] for item in approximations]))
+    else:
+      converted.append(approximate(reading))
+  per_unit = [item[0] for item in converted]
+  grouped: list[ApproximationValue] = []
   offset = 0
   for word in jyutpin_result.words:
-    syllables = per_character[offset:offset + len(word)]
-    if any(syllable is None for syllable in syllables):
+    end = offset
+    consumed = ""
+    while end < len(jyutpin_result.text) and len(consumed) < len(word):
+      consumed += jyutpin_result.text[end]
+      end += 1
+    syllables = per_unit[offset:end]
+    if len(syllables) == 1 and isinstance(syllables[0], list):
+      grouped.append(syllables[0])
+    elif any(syllable is None or isinstance(syllable, list) and any(part is None for part in syllable)
+             for syllable in syllables):
       grouped.append(None)
     else:
-      grouped.append(" ".join(syllable for syllable in syllables if syllable is not None))
-    offset += len(word)
+      grouped.append(" ".join(
+        syllable if isinstance(syllable, str) else " ".join(part for part in syllable if part is not None)
+        for syllable in syllables if syllable is not None
+      ))
+    offset = end
   result = ApproxPinyinResponse(
     text=jyutpin_result.text,
     jyutpin=jyutpin_result.jyutpin,
     words=jyutpin_result.words,
     jyutpin_words=jyutpin_result.jyutpin_words,
-    approx_pinyin=per_character,
+    approx_pinyin=per_unit,
     approx_pinyin_words=grouped,
     hint=[item[1] for item in converted],
   )

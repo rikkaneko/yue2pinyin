@@ -63,18 +63,17 @@ def test_frontend_interactions() -> None:
   word_spoken = subprocess.run([*session, "eval", "({spoken: window.__spoken, expected: document.querySelector('#pronunciation-result .word-card .word-trigger, #pronunciation-result .word-card .hanzi').textContent})"], capture_output=True, text=True, check=True)
   assert json.loads(word_spoken.stdout)["spoken"] == {"text": json.loads(word_spoken.stdout)["expected"], "lang": "zh-HK"}
 
-  # Unknown Latin characters coalesce into words; separators stay separate and have no reading controls.
-  unknown_text = "你好 龘龘 hello world，👋"
-  unknown_words = ["你好", *list(unknown_text[2:])]
-  unknown_jyutpin = ["nei5", "hou2", *["i1" if char == "e" else "ou1" if char == "o" else None for char in unknown_text[2:]]]
-  unknown_approx = ["nei2", "hao2", *["i1" if char == "e" else "ao1" if char == "o" else None for char in unknown_text[2:]]]
+  # Latin readings and hints use whole-word API text units; unknown text remains visible.
+  unknown_text = "你好 龘龘world HELLO，👋"
+  unknown_units = ["你", "好", " ", "龘", "龘", "world", " ", "HELLO", "，", "👋"]
   unknown = {
-    "text": list(unknown_text), "words": unknown_words,
-    "jyutpin": unknown_jyutpin,
-    "approx_pinyin": unknown_approx,
-    "hint": [None, None, *["source sound cue" if char == "e" else None for char in unknown_text[2:]]],
-    "jyutpin_words": ["nei5 hou2", *unknown_jyutpin[2:]],
-    "approx_pinyin_words": ["nei2 hao2", *unknown_approx[2:]],
+    "text": unknown_units,
+    "words": ["你好", " ", "龘", "龘", "world", " ", "HELLO", "，", "👋"],
+    "jyutpin": ["nei5", "hou2", None, None, None, None, None, ["haa1", "lou3"], None, None],
+    "approx_pinyin": ["nei2", "hao2", None, None, None, None, None, ["ha1", "lao3"], None, None],
+    "hint": [None, None, None, None, None, None, None, ["first sound cue", "second sound cue"], None, None],
+    "jyutpin_words": ["nei5 hou2", None, None, None, None, None, ["haa1", "lou3"], None, None],
+    "approx_pinyin_words": ["nei2 hao2", None, None, None, None, None, ["ha1", "lao3"], None, None],
   }
   subprocess.run([*session, "eval", (
     "window.__originalFetch = window.fetch; "
@@ -84,13 +83,13 @@ def test_frontend_interactions() -> None:
   )], check=True, capture_output=True)
   subprocess.run([*session, "eval", f"document.querySelector('#cantonese-input').value = {json.dumps(unknown_text, ensure_ascii=False)}; document.querySelector('#analyze-button').click();"], check=True, capture_output=True)
   subprocess.run([*session, "wait", "#pronunciation-result .word-card"], check=True, capture_output=True)
-  unknown_display = subprocess.run([*session, "eval", "({groups: Array.from(document.querySelectorAll('#pronunciation-result .word-card .hanzi')).map(node => node.textContent), controls: Array.from(document.querySelectorAll('#pronunciation-result .word-card')).map(card => [Boolean(card.querySelector('.approx')), Boolean(card.querySelector('.jyutpin')), Boolean(card.querySelector('.speak-word'))])})"], capture_output=True, text=True, check=True)
+  unknown_display = subprocess.run([*session, "eval", "({groups: Array.from(document.querySelectorAll('#pronunciation-result .word-card .word-trigger, #pronunciation-result .word-card .hanzi')).map(node => node.textContent), controls: Array.from(document.querySelectorAll('#pronunciation-result .word-card')).map(card => [Boolean(card.querySelector('.approx')), Boolean(card.querySelector('.jyutpin')), Boolean(card.querySelector('.speak-word'))])})"], capture_output=True, text=True, check=True)
   assert json.loads(unknown_display.stdout) == {
-    "groups": ["你好", " ", "龘龘", " ", "hello", " ", "world", "，", "👋"],
-    "controls": [[True, True, True], *([[False, False, False]] * 8)],
+    "groups": ["你好", " ", "龘龘", "world", " ", "HELLO", "，", "👋"],
+    "controls": [[True, True, True], *([[False, False, False]] * 4), [True, True, True], *([[False, False, False]] * 2)],
   }
-  latin_hints = subprocess.run([*session, "eval", "document.querySelectorAll('#pronunciation-result .word-trigger').length"], capture_output=True, text=True, check=True)
-  assert json.loads(latin_hints.stdout) == 0
+  latin_reading = subprocess.run([*session, "eval", "(() => { const card = Array.from(document.querySelectorAll('#pronunciation-result .word-card')).find(node => node.querySelector('.word-trigger')?.textContent === 'HELLO'); return {word: card?.querySelector('.word-trigger')?.textContent, approx: card?.querySelector('.approx')?.textContent, jyutpin: card?.querySelector('.jyutpin')?.textContent, hints: Array.from(card?.querySelectorAll('.word-hint-content p') ?? []).map(node => ({label: node.querySelector('strong')?.textContent, cue: node.textContent}))}; })()"], capture_output=True, text=True, check=True)
+  assert json.loads(latin_reading.stdout) == {"word": "HELLO", "approx": "ha1 lao3", "jyutpin": "haa1 lou3", "hints": [{"label": "ha1", "cue": "ha1first sound cue"}, {"label": "lao3", "cue": "lao3second sound cue"}]}
   subprocess.run([*session, "eval", "window.fetch = window.__originalFetch; delete window.__originalFetch;"], check=True, capture_output=True)
 
   subprocess.run([*session, "eval", "document.querySelector('#cantonese-input').value = '三甲'; document.querySelector('#analyze-button').click();"], check=True, capture_output=True)

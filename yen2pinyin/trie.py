@@ -12,18 +12,36 @@ import zlib
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeAlias
+
+from yen2pinyin.contracts import WordEntry
 
 
-CACHE_VERSION = 1
+CACHE_VERSION = 3
 SYLLABLE = re.compile(r"[a-z]+[1-6]\Z")
+TrieReading: TypeAlias = str | list[str]
 
 
 @dataclass
 class LookupResult:
-  jyutpin: list[str | None]
+  text: list[str]
+  jyutpin: list[TrieReading | None]
   words: list[str]
-  jyutpin_words: list[str | None]
+  jyutpin_words: list[TrieReading | None]
+
+
+def split_units(text: str) -> list[str]:
+  """Keep a Latin run together so borrowed words have one pronunciation slot."""
+  units: list[str] = []
+  for char in text:
+    latin = "LATIN" in unicodedata.name(char, "")
+    if units and (latin or (char.isdigit() or unicodedata.category(char).startswith("M")) and
+                  "LATIN" in unicodedata.name(units[-1][0], "")):
+      if "LATIN" in unicodedata.name(units[-1][0], ""):
+        units[-1] += char
+        continue
+    units.append(char)
+  return units
 
 
 class PronunciationTrie:
@@ -31,7 +49,7 @@ class PronunciationTrie:
     self,
     base: list[int],
     check: list[int],
-    values: dict[int, list[str]],
+    values: dict[int, list[TrieReading]],
     characters: dict[str, dict[str, int]],
   ) -> None:
     self.base = base
@@ -45,10 +63,12 @@ class PronunciationTrie:
     words_path: Path,
     characters_path: Path,
     cache_path: Path,
+    flashcard_path: Path,
+    flashcard_entries: list[WordEntry],
   ) -> PronunciationTrie:
-    # Bind the cache to both pronunciation sources, since frequencies choose word variants.
+    # Bind the cache to all pronunciation sources, including flashcard headwords.
     source_hash = hashlib.sha256()
-    for path in (words_path, characters_path):
+    for path in (words_path, characters_path, flashcard_path):
       with path.open("rb") as source:
         for chunk in iter(lambda: source.read(1024 * 1024), b""):
           source_hash.update(chunk)
@@ -69,22 +89,53 @@ class PronunciationTrie:
       pass
 
     characters: dict[str, dict[str, int]] = json.loads(characters_path.read_text(encoding="utf-8"))
-    readings: dict[str, list[list[str]]] = {}
+    readings: dict[str, list[list[TrieReading]]] = {}
     with words_path.open(encoding="utf-8", newline="") as source:
       for row in csv.DictReader(source):
-        word = row["words"]
+        word = row["words"].lower()
         syllables = row["jyutpin"].split()
+        units = split_units(word)
         # Word boundaries are enforced before lookup; punctuated source entries cannot match.
         if (
           not word
           or any(char.isspace() or unicodedata.category(char).startswith("P") for char in word)
-          or len(word) != len(syllables)
           or any(SYLLABLE.fullmatch(syllable) is None for syllable in syllables)
         ):
           continue
+        if len(units) == len(syllables):
+          aligned = syllables
+        elif len(units) == 1 and len(word) > 1:
+          aligned = [syllables]
+        else:
+          continue
         variants = readings.setdefault(word, [])
-        if syllables not in variants:
-          variants.append(syllables)
+        if aligned not in variants:
+          variants.append(aligned)
+
+    # Flashcard readings fill missing words. Multi-syllable Latin runs occupy one unit.
+    for entry in flashcard_entries:
+      for headword in entry.headwords:
+        word = headword.word.lower()
+        if not word or word in readings or any(
+          char.isspace() or unicodedata.category(char).startswith("P") for char in word
+        ):
+          continue
+        units = split_units(word)
+        variants = []
+        for reading in headword.readings:
+          syllables = reading.split()
+          if not syllables or any(SYLLABLE.fullmatch(syllable) is None for syllable in syllables):
+            continue
+          if len(units) == len(syllables):
+            aligned = syllables
+          elif len(units) == 1 and len(word) > 1:
+            aligned = [syllables]
+          else:
+            continue
+          if aligned not in variants:
+            variants.append(aligned)
+        if variants:
+          readings[word] = variants
 
     root: dict[int, Any] = {}
     for word, variants in readings.items():
@@ -92,8 +143,8 @@ class PronunciationTrie:
       syllables = max(
         variants,
         key=lambda variant: sum(
-          characters.get(char, {}).get(syllable, 0)
-          for char, syllable in zip(word, variant)
+          characters.get(char, {}).get(syllable, 0) if isinstance(syllable, str) else 0
+          for char, syllable in zip(split_units(word), variant)
         ),
       )
       node = root
@@ -104,7 +155,7 @@ class PronunciationTrie:
     # UTF-8 bytes provide a bounded edge alphabet for the double-array layout.
     base = [0]
     check = [0]
-    values: dict[int, list[str]] = {}
+    values: dict[int, list[TrieReading]] = {}
     queue = deque([(root, 0)])
     next_free = 1
     next_candidate = 1
@@ -153,11 +204,11 @@ class PronunciationTrie:
       temporary.unlink(missing_ok=True)
     return trie
 
-  def longest(self, text: str, start: int, end: int) -> tuple[int, list[str]] | None:
+  def longest(self, text: list[str], start: int, end: int) -> tuple[int, list[TrieReading]] | None:
     node = 0
-    best: tuple[int, list[str]] | None = None
+    best: tuple[int, list[TrieReading]] | None = None
     for position in range(start, end):
-      for byte in text[position].encode("utf-8"):
+      for byte in text[position].lower().encode("utf-8"):
         slot = self.base[node] + byte + 1
         if slot >= len(self.check) or self.check[slot] != node:
           return best
@@ -167,40 +218,44 @@ class PronunciationTrie:
     return best
 
   def annotate(self, text: str) -> LookupResult:
-    result: list[str | None] = [None] * len(text)
+    units = split_units(text)
+    result: list[TrieReading | None] = [None] * len(units)
     words: list[str] = []
-    jyutpin_words: list[str | None] = []
+    jyutpin_words: list[TrieReading | None] = []
     segments: list[tuple[int, int, bool]] = []
     start = 0
-    for index, char in enumerate(text):
-      if char.isspace() or unicodedata.category(char).startswith("P"):
+    for index, unit in enumerate(units):
+      if unit.isspace() or unicodedata.category(unit[0]).startswith("P"):
         if start < index:
           segments.append((start, index, False))
         segments.append((index, index + 1, True))
         start = index + 1
-    if start < len(text):
-      segments.append((start, len(text), False))
+    if start < len(units):
+      segments.append((start, len(units), False))
 
     # All lookup spans are fixed before matching, so no word crosses a separator.
     for start, end, separator in segments:
       if separator:
-        words.append(text[start])
+        words.append(units[start])
         jyutpin_words.append(None)
         continue
       position = start
       while position < end:
-        match = self.longest(text, position, end)
+        match = self.longest(units, position, end)
         if match is not None:
           stop, syllables = match
           result[position:stop] = syllables
-          words.append(text[position:stop])
-          jyutpin_words.append(" ".join(syllables))
+          words.append("".join(units[position:stop]))
+          jyutpin_words.append(
+            syllables[0] if len(syllables) == 1 and isinstance(syllables[0], list)
+            else " ".join(syllable if isinstance(syllable, str) else " ".join(syllable) for syllable in syllables)
+          )
           position = stop
           continue
-        candidates = self.characters.get(text[position], {})
-        words.append(text[position])
+        candidates = self.characters.get(units[position], {})
+        words.append(units[position])
         if candidates:
           result[position] = max(candidates, key=candidates.get)
         jyutpin_words.append(result[position])
         position += 1
-    return LookupResult(jyutpin=result, words=words, jyutpin_words=jyutpin_words)
+    return LookupResult(text=units, jyutpin=result, words=words, jyutpin_words=jyutpin_words)

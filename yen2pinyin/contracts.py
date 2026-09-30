@@ -1,6 +1,12 @@
 """Public request and response contracts."""
 
+from typing import TypeAlias
+
 from pydantic import BaseModel, ConfigDict, StrictStr
+
+
+JyutpinValue: TypeAlias = str | list[str] | None
+ApproximationValue: TypeAlias = str | list[str | None] | None
 
 
 class TextRequest(BaseModel):
@@ -9,17 +15,29 @@ class TextRequest(BaseModel):
   text: StrictStr
 
 
+class JyutpinRequest(BaseModel):
+  model_config = ConfigDict(extra="forbid")
+
+  jyutpin: list[StrictStr | list[StrictStr] | None]
+
+
 class JyutpinResponse(BaseModel):
   text: list[str]
-  jyutpin: list[str | None]
+  jyutpin: list[JyutpinValue]
   words: list[str]
-  jyutpin_words: list[str | None]
+  jyutpin_words: list[JyutpinValue]
 
 
 class ApproxPinyinResponse(JyutpinResponse):
-  approx_pinyin: list[str | None]
-  approx_pinyin_words: list[str | None]
-  hint: list[str | None]
+  approx_pinyin: list[ApproximationValue]
+  approx_pinyin_words: list[ApproximationValue]
+  hint: list[ApproximationValue]
+
+
+class DirectApproxPinyinResponse(BaseModel):
+  jyutpin: list[JyutpinValue]
+  approx_pinyin: list[ApproximationValue]
+  hint: list[ApproximationValue]
 
 
 class Headword(BaseModel):

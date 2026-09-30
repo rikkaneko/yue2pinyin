@@ -21,20 +21,37 @@ const exampleSentences = [
   '唔該幫我埋單。',
   '檸檬茶少甜少冰，唔該。',
 ];
+const jyutpinReadingSchema = z.union([z.string(), z.array(z.string())]).nullable();
+const approximationReadingSchema = z.union([z.string(), z.array(z.string().nullable())]).nullable();
 const approximationSchema = z.object({
   text: z.array(z.string()),
   words: z.array(z.string()),
-  jyutpin: z.array(z.string().nullable()),
-  jyutpin_words: z.array(z.string().nullable()),
-  approx_pinyin: z.array(z.string().nullable()),
-  approx_pinyin_words: z.array(z.string().nullable()),
-  hint: z.array(z.string().nullable()),
+  jyutpin: z.array(jyutpinReadingSchema),
+  jyutpin_words: z.array(jyutpinReadingSchema),
+  approx_pinyin: z.array(approximationReadingSchema),
+  approx_pinyin_words: z.array(approximationReadingSchema),
+  hint: z.array(approximationReadingSchema),
 }).refine((value) =>
   value.text.length === value.jyutpin.length &&
   value.text.length === value.approx_pinyin.length &&
   value.text.length === value.hint.length &&
   value.words.length === value.jyutpin_words.length &&
   value.words.length === value.approx_pinyin_words.length &&
+  value.text.every((_, index) => {
+    const jyutpin = value.jyutpin[index];
+    const approx = value.approx_pinyin[index];
+    const hint = value.hint[index];
+    return Array.isArray(jyutpin)
+      ? Array.isArray(approx) && Array.isArray(hint) && jyutpin.length === approx.length && jyutpin.length === hint.length
+      : !Array.isArray(approx) && !Array.isArray(hint);
+  }) &&
+  value.words.every((_, index) => {
+    const jyutpin = value.jyutpin_words[index];
+    const approx = value.approx_pinyin_words[index];
+    return Array.isArray(jyutpin)
+      ? Array.isArray(approx) && jyutpin.length === approx.length
+      : !Array.isArray(approx);
+  }) &&
   value.words.join('') === value.text.join(''),
 );
 const wordSchema = z.object({
@@ -58,41 +75,53 @@ function renderPronunciation(result) {
   const displayGroups = [];
   let offset = 0;
   result.words.forEach((word, index) => {
-    const characters = Array.from(word);
-    const hints = characters.map((character, characterIndex) => ({
-      character,
-      text: result.hint[offset + characterIndex],
-    })).filter((item) => item.text);
-    offset += characters.length;
-    const latin = /^[\p{Script=Latin}\p{M}\p{N}]+$/u.test(word);
-    const previous = displayGroups.at(-1);
-    const latinJoiner = /^['’\-]$/u.test(word) && previous?.latin &&
-      /^[\p{Script=Latin}\p{M}\p{N}]+$/u.test(result.words[index + 1] ?? '');
-    if (latin || latinJoiner) {
-      if (previous?.latin) {
-        previous.word += word;
-      } else {
-        displayGroups.push({ word, jyutpin: null, approx: null, hints: [], mergeable: false, latin: true });
+    const hints = [];
+    let remaining = word;
+    // A Latin word is one API text unit, while Cantonese words contain character units.
+    while (remaining) {
+      const unit = result.text[offset];
+      if (!unit || !remaining.startsWith(unit)) {
+        throw new Error('Pronunciation text units do not align with words');
       }
-      return;
+      const unitHint = result.hint[offset];
+      const unitApprox = result.approx_pinyin[offset];
+      const latinUnit = /^[\p{Script=Latin}\p{M}\p{N}]+$/u.test(unit);
+      if (Array.isArray(unitHint)) {
+        unitHint.forEach((hint, syllableIndex) => {
+          if (hint) {
+            const approximation = Array.isArray(unitApprox) ? unitApprox[syllableIndex] : unitApprox;
+            hints.push({ character: latinUnit ? approximation || unit : unit, text: hint });
+          }
+        });
+      } else if (unitHint) {
+        const approximation = Array.isArray(unitApprox) ? unitApprox[0] : unitApprox;
+        hints.push({ character: latinUnit ? approximation || unit : unit, text: unitHint });
+      }
+      remaining = remaining.slice(unit.length);
+      offset += 1;
     }
     const jyutpin = result.jyutpin_words[index];
-    const mergeable = !jyutpin?.trim() && /^[\p{L}\p{N}\p{M}]+$/u.test(word);
-    if (mergeable && previous?.mergeable && !previous.latin) {
+    const mergeable = !(Array.isArray(jyutpin) ? jyutpin.some(Boolean) : jyutpin?.trim()) &&
+      /^[\p{L}\p{N}\p{M}]+$/u.test(word);
+    const latin = /^[\p{Script=Latin}\p{M}\p{N}]+$/u.test(word);
+    const previous = displayGroups.at(-1);
+    if (mergeable && previous?.mergeable && previous.latin === latin) {
       previous.word += word;
       previous.hints.push(...hints);
     } else {
-      displayGroups.push({ word, jyutpin, approx: result.approx_pinyin_words[index], hints, mergeable });
+      displayGroups.push({ word, jyutpin, approx: result.approx_pinyin_words[index], hints, mergeable, latin });
     }
   });
 
   displayGroups.forEach(({ word, jyutpin, approx, hints }) => {
     const card = $('<div class="word-card position-relative text-center px-1"></div>');
-    if (jyutpin?.trim()) {
-      if (approx?.trim()) {
-        card.append($('<span class="approx small text-primary fw-semibold"></span>').text(approx));
+    const displayedJyutpin = Array.isArray(jyutpin) ? jyutpin.filter(Boolean).join(' ') : jyutpin;
+    const displayedApprox = Array.isArray(approx) ? approx.filter(Boolean).join(' ') : approx;
+    if (displayedJyutpin?.trim()) {
+      if (displayedApprox?.trim()) {
+        card.append($('<span class="approx small text-primary fw-semibold"></span>').text(displayedApprox));
       }
-      card.append($('<span class="jyutpin small text-body-secondary"></span>').text(jyutpin));
+      card.append($('<span class="jyutpin small text-body-secondary"></span>').text(displayedJyutpin));
     }
     if (hints.length) {
       const trigger = $('<button class="word-trigger btn btn-link text-body fw-semibold p-0" type="button" aria-expanded="false" aria-controls="active-hint-box" aria-keyshortcuts="Shift+F10"></button>')
@@ -108,7 +137,7 @@ function renderPronunciation(result) {
     } else {
       card.append($('<span class="hanzi fw-semibold"></span>').text(word));
     }
-    if (jyutpin?.trim() && word.trim()) {
+    if (displayedJyutpin?.trim() && word.trim()) {
       card.append($('<button class="btn btn-sm btn-link speak-word p-0" type="button">播放</button>')
         .attr('data-speak', word).attr('aria-label', `播放 ${word}`));
     }
