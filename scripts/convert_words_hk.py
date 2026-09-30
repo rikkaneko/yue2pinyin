@@ -14,7 +14,7 @@ from pydantic import BaseModel, field_validator, model_validator
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SOURCE_PATH = PROJECT_ROOT / "assests/words-hk/all-1790539501.csv"
+SOURCE_PATH = PROJECT_ROOT / "assests/words-hk/all-latest.csv"
 OUTPUT_PATH = SOURCE_PATH.with_suffix(".yaml")
 ANNOTATION = re.compile(r"\((pos|sim|label|ant|img|ref):([^)]*)\)")
 TAG = re.compile(r"<([a-z][a-z0-9_-]*)>\Z")

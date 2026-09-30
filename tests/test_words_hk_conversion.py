@@ -62,9 +62,9 @@ def test_multiline_annotations_definitions_and_examples(tmp_path: Path) -> None:
   assert first["sim"] == ["樣板", "模本"]
   assert first["label"] == ["外來語"]
   assert first["ant"] == ["原件"]
-  assert first["source_field_4"] == "模形"
   assert first["reviewed"] == 1
-  assert first["publication_status"] == "已公開"
+  assert "source_field_4" not in first
+  assert "publication_status" not in first
   assert "review_status" not in first
   assert "raw_headword" not in first
   assert "raw_definition" not in first
@@ -98,6 +98,7 @@ def test_multiline_annotations_definitions_and_examples(tmp_path: Path) -> None:
   raw_entries = raw_document["entries"]
   assert raw_entries[0]["raw_headword"] == "模型:mou4 jing4:mou6 jing4,model:!"
   assert raw_entries[0]["raw_definition"].startswith("(pos:名詞)(pos:語素)")
+  assert raw_entries[0]["publication_status"] == "已公開"
   assert raw_entries[2]["reviewed"] == 0
 
 

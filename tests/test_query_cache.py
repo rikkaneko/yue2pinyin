@@ -19,6 +19,9 @@ def test_query_results_reuse_jyutpin_and_approximation(tmp_path: Path, monkeypat
   monkeypatch.setenv("YEN2PINYIN_WORDS_PATH", str(words))
   monkeypatch.setenv("YEN2PINYIN_CHARACTERS_PATH", str(characters))
   monkeypatch.setenv("YEN2PINYIN_CACHE_PATH", str(tmp_path / "trie.dat"))
+  flashcards = tmp_path / "flashcards.yaml"
+  flashcards.write_text("metadata: {}\nentries:\n  - headwords: [{word: 你好, readings: [nei5 hou2]}]\n    pos: []\n    sim: []\n    label: []\n    ant: []\n    img: []\n    ref: []\n    definitions: [{explanation: [], eg: [{yue: 你好, jyutpin: nei5 hou2}]}]\n    reviewed: 1\n", encoding="utf-8")
+  monkeypatch.setenv("YEN2PINYIN_FLASHCARD_WORDS_PATH", str(flashcards))
 
   with TestClient(api.app) as client:
     with patch.object(api.app.state.trie, "annotate", wraps=api.app.state.trie.annotate) as lookup:
@@ -62,6 +65,9 @@ def test_independent_lru_eviction_and_lifespan_reset(tmp_path: Path, monkeypatch
   monkeypatch.setenv("YEN2PINYIN_WORDS_PATH", str(words))
   monkeypatch.setenv("YEN2PINYIN_CHARACTERS_PATH", str(characters))
   monkeypatch.setenv("YEN2PINYIN_CACHE_PATH", str(tmp_path / "trie.dat"))
+  flashcards = tmp_path / "flashcards.yaml"
+  flashcards.write_text("metadata: {}\nentries:\n  - headwords: [{word: 你好, readings: [nei5 hou2]}]\n    pos: []\n    sim: []\n    label: []\n    ant: []\n    img: []\n    ref: []\n    definitions: [{explanation: [], eg: [{yue: 你好, jyutpin: nei5 hou2}]}]\n    reviewed: 1\n", encoding="utf-8")
+  monkeypatch.setenv("YEN2PINYIN_FLASHCARD_WORDS_PATH", str(flashcards))
   assert api.QUERY_CACHE_SIZE == 1000
   monkeypatch.setattr(api, "QUERY_CACHE_SIZE", 2)
 

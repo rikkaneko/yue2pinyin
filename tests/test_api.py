@@ -15,6 +15,9 @@ def test_routes_and_alignment(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
   monkeypatch.setenv("YEN2PINYIN_WORDS_PATH", str(words))
   monkeypatch.setenv("YEN2PINYIN_CHARACTERS_PATH", str(characters))
   monkeypatch.setenv("YEN2PINYIN_CACHE_PATH", str(tmp_path / "cache.dat"))
+  flashcards = tmp_path / "flashcards.yaml"
+  flashcards.write_text("metadata: {}\nentries:\n  - headwords: [{word: 你好, readings: [nei5 hou2]}]\n    pos: []\n    sim: []\n    label: []\n    ant: []\n    img: []\n    ref: []\n    definitions: [{explanation: [], eg: [{yue: 你好, jyutpin: nei5 hou2}]}]\n    reviewed: 1\n", encoding="utf-8")
+  monkeypatch.setenv("YEN2PINYIN_FLASHCARD_WORDS_PATH", str(flashcards))
   with TestClient(app) as client:
     schema = client.get("/openapi.json").json()
     assert schema["info"]["title"] == "yen2pinyin"
