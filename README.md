@@ -40,7 +40,7 @@ Compose passes the `YEN2PINYIN_*` values from `.env` into the container. The ser
 | `YEN2PINYIN_FLASHCARD_WORDS_PATH` | `assests/words-hk/all-latest.yaml` within the package project | Words.hk flashcard and pronunciation source |
 | `YEN2PINYIN_CORS_ORIGINS` | empty | Comma-separated allowed frontend origins; empty denies cross-origin browser requests |
 
-CORS entries can be exact HTTP(S) origins (`https://app.nekoid.cc`), subdomains (`https://*.nekoid.cc`), or a host with any explicit numeric port (`http://localhost:*`). A subdomain wildcard excludes the root domain. List the root separately when needed. Paths, query strings, malformed hosts, and invalid fixed ports fail validation at process start. Cross-origin `GET`, `POST`, and `Content-Type` preflight requests are supported without credentials. Restart the API after changing this setting.
+CORS entries can be exact HTTP(S) origins (`https://app.nekoid.cc`), subdomains (`https://*.nekoid.cc`), or a host with any explicit numeric port (`http://localhost:*`). A subdomain wildcard excludes the root domain. List the root separately when needed. Paths, query strings, malformed hosts, and invalid fixed ports fail validation at process start. Cross-origin `GET`, `POST`, and `Content-Type` preflight requests are supported without credentials. Allowed preflights advertise `Access-Control-Max-Age: 86400` (one day); browsers may evict or cap that cache sooner. Restart the API after changing CORS settings.
 
 ## Features
 
@@ -86,7 +86,7 @@ To run the optional browser regression, start the API with `YEN2PINYIN_CORS_ORIG
 
 ## License
 
-LGPLv3
+AGPLv3
 
 The bundled source dictionaries may have separate licenses; verify their terms before redistribution.
 

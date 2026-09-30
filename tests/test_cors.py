@@ -58,6 +58,7 @@ for origin in (
   assert response.headers["access-control-allow-origin"] == origin
   assert "POST" in response.headers["access-control-allow-methods"]
   assert "content-type" in response.headers["access-control-allow-headers"].lower()
+  assert response.headers["access-control-max-age"] == "86400"
 
 for origin in (
   "https://nekoid.cc", "https://evilnekoid.cc", "http://localhost",
