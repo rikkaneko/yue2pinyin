@@ -1,3 +1,18 @@
+.app-shell {
+  padding-bottom: 3rem;
+}
+
+.site-footer {
+  position: fixed;
+  z-index: 10;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  padding: .375rem 1rem;
+  line-height: 1.25rem;
+  overflow-wrap: anywhere;
+}
+
 .sidebar {
   width: 260px;
   flex: 0 0 260px;
@@ -167,6 +182,10 @@
 }
 
 @media (max-width: 575px) {
+  .app-shell {
+    padding-bottom: 4rem;
+  }
+
   .field-list {
     grid-template-columns: 1fr;
     gap: 3px;
