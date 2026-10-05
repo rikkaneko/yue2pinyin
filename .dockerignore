@@ -8,3 +8,4 @@ __pycache__
 frontend
 jyutping.dat
 *.sqlite3
+!words.sqlite3
