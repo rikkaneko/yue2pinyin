@@ -4,19 +4,19 @@ from collections import OrderedDict
 from contextlib import asynccontextmanager
 from pathlib import Path
 import re
-from random import choice
+from random import randrange
+import sqlite3
 from typing import Annotated, AsyncGenerator
 
-import yaml
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import ValidationError, field_validator
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from yen2pinyin.approximation import approximate
 from yen2pinyin.contracts import (
   ApproximationValue, ApproxPinyinResponse, DirectApproxPinyinResponse, JyutpinRequest,
-  JyutpinResponse, JyutpinValue, TextRequest, WordDocument, WordEntry,
+  JyutpinResponse, JyutpinValue, TextRequest, WordEntry,
 )
 from yen2pinyin.trie import PronunciationTrie
 
@@ -33,8 +33,8 @@ class Settings(BaseSettings):
 
   words_path: Path = PROJECT_ROOT / "assests/rime-cantonese/jyut6ping3.words.dict.csv"
   characters_path: Path = PROJECT_ROOT / "assests/words-hk/charlist.json"
-  cache_path: Path = Path("/tmp/yen2pinyin/jyutping.dat")
-  flashcard_words_path: Path = PROJECT_ROOT / "assests/words-hk/all-latest.yaml"
+  cache_path: Path = PROJECT_ROOT / "jyutping.dat"
+  flashcard_db_path: Path = PROJECT_ROOT / "words.sqlite3"
   cors_origins: Annotated[list[str], NoDecode] = []
 
   @field_validator("cors_origins", mode="before")
@@ -60,40 +60,51 @@ class Settings(BaseSettings):
 
 class WordCatalog:
   def __init__(self, source: Path) -> None:
-    # Parse and validate once per worker so requests only perform a random draw.
+    # Open the built catalog without loading its records into worker memory.
     try:
-      with source.open(encoding="utf-8") as stream:
-        document = WordDocument.model_validate(yaml.load(
-          stream, Loader=yaml.CSafeLoader if hasattr(yaml, "CSafeLoader") else yaml.SafeLoader,
-        ))
-    except (OSError, yaml.YAMLError, ValidationError) as error:
-      raise RuntimeError(f"Cannot load flashcard words from {source}: {error}") from error
+      self.connection = sqlite3.connect(source.resolve().as_uri() + "?mode=ro", uri=True)
+      version = self.connection.execute("PRAGMA user_version").fetchone()[0]
+      if version != 1:
+        raise ValueError(f"unsupported schema version {version}")
+      row = self.connection.execute("SELECT eligible_count FROM catalog_meta").fetchone()
+      if row is None or not isinstance(row[0], int) or row[0] < 1:
+        raise ValueError("no eligible flashcard entries")
+      self.eligible_count = row[0]
+      if self.connection.execute("SELECT COUNT(*) FROM entries").fetchone()[0] != self.eligible_count:
+        raise ValueError("eligible entry count does not match catalog metadata")
+      self.connection.execute("SELECT word, readings FROM headwords LIMIT 1").fetchone()
+    except (OSError, sqlite3.Error, ValueError) as error:
+      if hasattr(self, "connection"):
+        self.connection.close()
+      raise RuntimeError(f"Cannot load flashcard database from {source}: {error}") from error
 
-    self.all_entries = document.entries
-    self.entries = tuple(
-      entry for entry in document.entries
-      if any(
-        example.yue is not None and example.yue.strip() and example.yue.strip().upper() != "X"
-        for definition in entry.definitions for example in definition.eg
-      )
-    )
-    if not self.entries:
-      raise RuntimeError(f"No flashcard words with substantive Cantonese examples in {source}")
+  def get(self, entry_id: int) -> WordEntry:
+    row = self.connection.execute("SELECT payload FROM entries WHERE id = ?", (entry_id,)).fetchone()
+    if row is None:
+      raise RuntimeError(f"Flashcard entry {entry_id} is missing")
+    return WordEntry.model_validate_json(row[0])
+
+  def close(self) -> None:
+    self.connection.close()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
   # Resolve the optional dotenv file at startup, using the process working directory.
   settings = Settings(_env_file=Path.cwd() / ".env")
-  app.state.word_catalog = WordCatalog(settings.flashcard_words_path)
-  app.state.trie = PronunciationTrie.load_or_build(
-    settings.words_path, settings.characters_path, settings.cache_path,
-    settings.flashcard_words_path, app.state.word_catalog.all_entries,
-  )
-  # Query results live with this trie instance and are discarded at worker restart.
-  app.state.jyutpin_cache = OrderedDict()
-  app.state.approx_pinyin_cache = OrderedDict()
-  yield
+  app.state.word_catalog = WordCatalog(settings.flashcard_db_path)
+  try:
+    app.state.trie = PronunciationTrie.load_or_build(
+      settings.words_path, settings.characters_path, settings.cache_path,
+      settings.flashcard_db_path,
+      app.state.word_catalog.connection.execute("SELECT word, readings FROM headwords ORDER BY id"),
+    )
+    # Query results live with this trie instance and are discarded at worker restart.
+    app.state.jyutpin_cache = OrderedDict()
+    app.state.approx_pinyin_cache = OrderedDict()
+    yield
+  finally:
+    app.state.word_catalog.close()
 
 
 app = FastAPI(title="yen2pinyin", lifespan=lifespan)
@@ -128,7 +139,7 @@ app.add_middleware(
 @app.get("/word", response_model=WordEntry, response_model_exclude_unset=True)
 async def word(request: Request) -> WordEntry:
   catalog: WordCatalog = request.app.state.word_catalog
-  return choice(catalog.entries)
+  return catalog.get(randrange(1, catalog.eligible_count + 1))
 
 
 @app.post("/jyutpin", response_model=JyutpinResponse)

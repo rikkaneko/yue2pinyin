@@ -10,10 +10,11 @@ Requires Python 3.11 or newer. From the project root:
 uv venv --managed-python --seed .venv
 uv pip install --python .venv/bin/python -e '.[test]'
 cp -n .env.example .env;
+.venv/bin/python scripts/build_flashcard_db.py
 .venv/bin/uvicorn yen2pinyin.api:app --host 127.0.0.1 --port 8000
 ```
 
-At startup, the app reads `.env` from its current working directory if present. The copy command above leaves an existing `.env` untouched. Process environment variables take precedence over `.env`; missing settings use the defaults below. The example file sets the cache to `./jyutping.dat`, which is ignored by Git. The first startup compiles Rime words and Words.hk headword readings into a double-array trie. Later starts reuse a compressed cache when the word CSV, character frequency JSON, and flashcard YAML are unchanged.
+Build the SQLite catalog again whenever the Words.hk YAML changes. At startup, the app reads `.env` from its current working directory if present. The copy command above leaves an existing `.env` untouched. Process environment variables take precedence over `.env`; missing settings use the defaults below.
 
 The API serves `/jyutpin`, `/approx_pinyin`, and `/word`; it does not serve the frontend. Set `YEN2PINYIN_CORS_ORIGINS=http://localhost:8080` in `.env` before starting it, then serve `frontend/` from another terminal:
 
@@ -30,14 +31,14 @@ cp -n .env.example .env;
 docker compose up --build;
 ```
 
-Compose passes the `YEN2PINYIN_*` values from `.env` into the container. The service listens on port 8000 inside the Compose network, but `compose.yaml` publishes no host port. To access it from the host, explicitly add a `ports` mapping such as `127.0.0.1:8000:8000` in a local Compose override. The compiled trie cache is stored inside the container by default.
+The Docker build generates the SQLite catalog from the bundled YAML. Compose passes the `YEN2PINYIN_*` values from `.env` into the container. The service listens on port 8000 inside the Compose network, but `compose.yaml` publishes no host port. To access it from the host, explicitly add a `ports` mapping such as `127.0.0.1:8000:8000` in a local Compose override. The compiled trie cache is stored inside the container by default.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `YEN2PINYIN_WORDS_PATH` | `assests/rime-cantonese/jyut6ping3.words.dict.csv` within the package project | Word dictionary |
 | `YEN2PINYIN_CHARACTERS_PATH` | `assests/words-hk/charlist.json` within the package project | Character pronunciation counts |
-| `YEN2PINYIN_CACHE_PATH` | `/tmp/yen2pinyin/jyutping.dat` | Writable compiled-trie cache |
-| `YEN2PINYIN_FLASHCARD_WORDS_PATH` | `assests/words-hk/all-latest.yaml` within the package project | Words.hk flashcard and pronunciation source |
+| `YEN2PINYIN_CACHE_PATH` | `./jyutping.dat` | Writable compiled-trie cache |
+| `YEN2PINYIN_FLASHCARD_DB_PATH` | `./words.sqlite3` within the package project | Built Words.hk flashcard and pronunciation catalog |
 | `YEN2PINYIN_CORS_ORIGINS` | empty | Comma-separated allowed frontend origins; empty denies cross-origin browser requests |
 
 CORS entries can be exact HTTP(S) origins (`https://app.nekoid.cc`), subdomains (`https://*.nekoid.cc`), or a host with any explicit numeric port (`http://localhost:*`). A subdomain wildcard excludes the root domain. List the root separately when needed. Paths, query strings, malformed hosts, and invalid fixed ports fail validation at process start. Cross-origin `GET`, `POST`, and `Content-Type` preflight requests are supported without credentials. Allowed preflights advertise `Access-Control-Max-Age: 86400` (one day); browsers may evict or cap that cache sooner. Restart the API after changing CORS settings.
@@ -70,7 +71,7 @@ For text input, `/approx_pinyin` adds per-unit `approx_pinyin` and `hint`, plus 
 
 Each API worker keeps separate in-memory LRU caches of the latest 1,000 exact input texts for Jyutpin and approximate-pinyin responses. An approximate-pinyin cache miss reuses the Jyutpin result cache. These query caches start empty on worker startup and are not shared across workers; the compiled dictionary cache described above remains on disk.
 
-`GET /word` returns one complete Words.hk entry as JSON. The source YAML loads once per worker at startup. Entries qualify when at least one example has nonempty Cantonese text other than `X` (ignoring case and surrounding whitespace). Draws may repeat. Missing, invalid, or ineligible sources fail startup with a clear error. See [flashcard and frontend details](docs/flashcards-frontend.md).
+`GET /word` returns one complete Words.hk entry as JSON. Each worker opens the built SQLite database read-only and fetches only the selected entry. Entries qualify when at least one example has nonempty Cantonese text other than `X` (ignoring case and surrounding whitespace). Draws may repeat. A missing, incompatible, or empty database fails startup with a clear error. See [flashcard and frontend details](docs/flashcards-frontend.md).
 
 ## words.hk CSV conversion
 

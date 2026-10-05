@@ -1,4 +1,7 @@
 from pathlib import Path
+import sqlite3
+import subprocess
+import sys
 from unittest.mock import patch
 
 import pytest
@@ -7,6 +10,9 @@ from fastapi.testclient import TestClient
 from pytest import MonkeyPatch
 
 from yen2pinyin.api import WordCatalog, app
+
+
+BUILD_SCRIPT = Path(__file__).resolve().parents[1] / "scripts/build_flashcard_db.py"
 
 
 def test_word_route_returns_complete_eligible_record(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
@@ -43,39 +49,52 @@ def test_word_route_returns_complete_eligible_record(tmp_path: Path, monkeypatch
   monkeypatch.setenv("YEN2PINYIN_WORDS_PATH", str(words))
   monkeypatch.setenv("YEN2PINYIN_CHARACTERS_PATH", str(characters))
   monkeypatch.setenv("YEN2PINYIN_CACHE_PATH", str(tmp_path / "trie.dat"))
-  monkeypatch.setenv("YEN2PINYIN_FLASHCARD_WORDS_PATH", str(source))
+  database = tmp_path / "words.sqlite3"
+  subprocess.run([sys.executable, str(BUILD_SCRIPT), "--input", str(source), "--output", str(database)], check=True)
+  monkeypatch.setenv("YEN2PINYIN_FLASHCARD_DB_PATH", str(database))
 
   with TestClient(app) as client:
     schema = client.get("/openapi.json").json()
     assert "/word" in schema["paths"]
-    assert len(app.state.word_catalog.entries) == 2
-    with patch("yen2pinyin.api.choice", side_effect=lambda entries: entries[0]) as chosen:
+    assert app.state.word_catalog.eligible_count == 2
+    with patch("yen2pinyin.api.randrange", return_value=1) as chosen:
       assert client.get("/word").json() == valid
       assert chosen.call_count == 1
-      assert len(chosen.call_args.args[0]) == 2
-    with patch("yen2pinyin.api.choice", side_effect=lambda entries: entries[1]):
+      assert chosen.call_args.args == (1, 3)
+    with patch("yen2pinyin.api.randrange", return_value=2):
       assert client.get("/word").json() == second
     assert client.get("/").status_code == 404
     assert client.get("/assets/app.js").status_code == 404
 
 
 def test_flashcard_source_failures_are_explicit(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
-  missing = tmp_path / "missing.yaml"
-  with pytest.raises(RuntimeError, match="Cannot load flashcard words"):
+  missing = tmp_path / "missing.sqlite3"
+  with pytest.raises(RuntimeError, match="Cannot load flashcard database"):
     WordCatalog(missing)
 
-  invalid = tmp_path / "invalid.yaml"
-  invalid.write_text("entries: [\n", encoding="utf-8")
-  with pytest.raises(RuntimeError, match="Cannot load flashcard words"):
+  invalid = tmp_path / "invalid.sqlite3"
+  invalid.write_bytes(b"not sqlite")
+  with pytest.raises(RuntimeError, match="Cannot load flashcard database"):
     WordCatalog(invalid)
 
-  invalid.write_text("metadata: {}\nentries: [{}]\n", encoding="utf-8")
-  with pytest.raises(RuntimeError, match="Cannot load flashcard words"):
-    WordCatalog(invalid)
+  empty = tmp_path / "empty.sqlite3"
+  with sqlite3.connect(empty) as connection:
+    connection.execute("CREATE TABLE catalog_meta (eligible_count INTEGER)")
+    connection.execute("PRAGMA user_version = 1")
+  with pytest.raises(RuntimeError, match="Cannot load flashcard database"):
+    WordCatalog(empty)
 
-  invalid.write_text("metadata: {}\nentries: []\n", encoding="utf-8")
-  with pytest.raises(RuntimeError, match="No flashcard words"):
-    WordCatalog(invalid)
+  with sqlite3.connect(empty) as connection:
+    connection.execute("INSERT INTO catalog_meta VALUES (0)")
+  with pytest.raises(RuntimeError, match="no eligible flashcard"):
+    WordCatalog(empty)
+
+  with sqlite3.connect(empty) as connection:
+    connection.execute("UPDATE catalog_meta SET eligible_count = 1")
+    connection.execute("CREATE TABLE entries (id INTEGER PRIMARY KEY, payload TEXT)")
+    connection.execute("CREATE TABLE headwords (id INTEGER PRIMARY KEY, word TEXT, readings TEXT)")
+  with pytest.raises(RuntimeError, match="count does not match"):
+    WordCatalog(empty)
 
   words = tmp_path / "words.csv"
   words.write_text("words,jyutpin\n你好,nei5 hou2\n", encoding="utf-8")
@@ -84,7 +103,31 @@ def test_flashcard_source_failures_are_explicit(tmp_path: Path, monkeypatch: Mon
   monkeypatch.setenv("YEN2PINYIN_WORDS_PATH", str(words))
   monkeypatch.setenv("YEN2PINYIN_CHARACTERS_PATH", str(characters))
   monkeypatch.setenv("YEN2PINYIN_CACHE_PATH", str(tmp_path / "trie.dat"))
-  monkeypatch.setenv("YEN2PINYIN_FLASHCARD_WORDS_PATH", str(missing))
-  with pytest.raises(RuntimeError, match="Cannot load flashcard words"):
+  monkeypatch.setenv("YEN2PINYIN_FLASHCARD_DB_PATH", str(missing))
+  with pytest.raises(RuntimeError, match="Cannot load flashcard database"):
     with TestClient(app):
       pass
+
+
+def test_build_failure_does_not_replace_existing_database(tmp_path: Path) -> None:
+  source = tmp_path / "invalid.yaml"
+  database = tmp_path / "words.sqlite3"
+  database.write_bytes(b"existing catalog")
+  source.write_text("metadata: {}\nentries: [{}]\n", encoding="utf-8")
+  result = subprocess.run(
+    [sys.executable, str(BUILD_SCRIPT), "--input", str(source), "--output", str(database)],
+    capture_output=True, text=True,
+  )
+  assert result.returncode != 0
+  assert database.read_bytes() == b"existing catalog"
+  assert list(tmp_path.glob("*.tmp")) == []
+
+  source.write_text("metadata: {}\nentries: []\n", encoding="utf-8")
+  result = subprocess.run(
+    [sys.executable, str(BUILD_SCRIPT), "--input", str(source), "--output", str(database)],
+    capture_output=True, text=True,
+  )
+  assert result.returncode != 0
+  assert "No flashcard words" in result.stderr
+  assert database.read_bytes() == b"existing catalog"
+  assert list(tmp_path.glob("*.tmp")) == []

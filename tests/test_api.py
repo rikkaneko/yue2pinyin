@@ -1,11 +1,16 @@
 import json
 from pathlib import Path
+import subprocess
+import sys
 
 import yaml
 from fastapi.testclient import TestClient
 from pytest import MonkeyPatch
 
 from yen2pinyin.api import app
+
+
+BUILD_SCRIPT = Path(__file__).resolve().parents[1] / "scripts/build_flashcard_db.py"
 
 
 def test_routes_and_alignment(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
@@ -18,7 +23,9 @@ def test_routes_and_alignment(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
   monkeypatch.setenv("YEN2PINYIN_CACHE_PATH", str(tmp_path / "cache.dat"))
   flashcards = tmp_path / "flashcards.yaml"
   flashcards.write_text("metadata: {}\nentries:\n  - headwords: [{word: 你好, readings: [nei5 hou2]}]\n    pos: []\n    sim: []\n    label: []\n    ant: []\n    img: []\n    ref: []\n    definitions: [{explanation: [], eg: [{yue: 你好, jyutpin: nei5 hou2}]}]\n    reviewed: 1\n", encoding="utf-8")
-  monkeypatch.setenv("YEN2PINYIN_FLASHCARD_WORDS_PATH", str(flashcards))
+  database = tmp_path / "flashcards.sqlite3"
+  subprocess.run([sys.executable, str(BUILD_SCRIPT), "--input", str(flashcards), "--output", str(database)], check=True)
+  monkeypatch.setenv("YEN2PINYIN_FLASHCARD_DB_PATH", str(database))
   with TestClient(app) as client:
     schema = client.get("/openapi.json").json()
     assert schema["info"]["title"] == "yen2pinyin"
@@ -85,10 +92,17 @@ def test_flashcard_readings_and_direct_jyutpin(tmp_path: Path, monkeypatch: Monk
       "definitions": [{"explanation": [], "eg": [{"yue": "你好"}]}], "reviewed": 1,
     })
   entries[4]["definitions"][0]["eg"] = []
+  entries.append({
+    "headwords": [{"word": "HELLO", "readings": ["haa1 lou2"]}],
+    "pos": [], "sim": [], "label": [], "ant": [], "img": [], "ref": [],
+    "definitions": [{"explanation": [], "eg": []}], "reviewed": 1,
+  })
   flashcards.write_text(yaml.safe_dump({"metadata": {}, "entries": entries}, allow_unicode=True), encoding="utf-8")
   monkeypatch.setenv("YEN2PINYIN_WORDS_PATH", str(words))
   monkeypatch.setenv("YEN2PINYIN_CHARACTERS_PATH", str(characters))
-  monkeypatch.setenv("YEN2PINYIN_FLASHCARD_WORDS_PATH", str(flashcards))
+  database = tmp_path / "flashcards.sqlite3"
+  subprocess.run([sys.executable, str(BUILD_SCRIPT), "--input", str(flashcards), "--output", str(database)], check=True)
+  monkeypatch.setenv("YEN2PINYIN_FLASHCARD_DB_PATH", str(database))
   monkeypatch.setenv("YEN2PINYIN_CACHE_PATH", str(tmp_path / "trie.dat"))
 
   with TestClient(app) as client:

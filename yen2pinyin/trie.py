@@ -12,12 +12,10 @@ import zlib
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypeAlias
-
-from yen2pinyin.contracts import WordEntry
+from typing import Any, Iterable, TypeAlias
 
 
-CACHE_VERSION = 3
+CACHE_VERSION = 4
 SYLLABLE = re.compile(r"[a-z]+[1-6]\Z")
 TrieReading: TypeAlias = str | list[str]
 
@@ -63,12 +61,12 @@ class PronunciationTrie:
     words_path: Path,
     characters_path: Path,
     cache_path: Path,
-    flashcard_path: Path,
-    flashcard_entries: list[WordEntry],
+    flashcard_db_path: Path,
+    flashcard_headwords: Iterable[tuple[str, str]],
   ) -> PronunciationTrie:
     # Bind the cache to all pronunciation sources, including flashcard headwords.
     source_hash = hashlib.sha256()
-    for path in (words_path, characters_path, flashcard_path):
+    for path in (words_path, characters_path, flashcard_db_path):
       with path.open("rb") as source:
         for chunk in iter(lambda: source.read(1024 * 1024), b""):
           source_hash.update(chunk)
@@ -112,30 +110,29 @@ class PronunciationTrie:
         if aligned not in variants:
           variants.append(aligned)
 
-    # Flashcard readings fill missing words. Multi-syllable Latin runs occupy one unit.
-    for entry in flashcard_entries:
-      for headword in entry.headwords:
-        word = headword.word.lower()
-        if not word or word in readings or any(
-          char.isspace() or unicodedata.category(char).startswith("P") for char in word
-        ):
+    # Stream every Words.hk headword, including entries excluded from random draws.
+    for headword, readings_json in flashcard_headwords:
+      word = headword.lower()
+      if not word or word in readings or any(
+        char.isspace() or unicodedata.category(char).startswith("P") for char in word
+      ):
+        continue
+      units = split_units(word)
+      variants = []
+      for reading in json.loads(readings_json):
+        syllables = reading.split()
+        if not syllables or any(SYLLABLE.fullmatch(syllable) is None for syllable in syllables):
           continue
-        units = split_units(word)
-        variants = []
-        for reading in headword.readings:
-          syllables = reading.split()
-          if not syllables or any(SYLLABLE.fullmatch(syllable) is None for syllable in syllables):
-            continue
-          if len(units) == len(syllables):
-            aligned = syllables
-          elif len(units) == 1 and len(word) > 1:
-            aligned = [syllables]
-          else:
-            continue
-          if aligned not in variants:
-            variants.append(aligned)
-        if variants:
-          readings[word] = variants
+        if len(units) == len(syllables):
+          aligned = syllables
+        elif len(units) == 1 and len(word) > 1:
+          aligned = [syllables]
+        else:
+          continue
+        if aligned not in variants:
+          variants.append(aligned)
+      if variants:
+        readings[word] = variants
 
     root: dict[int, Any] = {}
     for word, variants in readings.items():

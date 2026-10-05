@@ -227,3 +227,4 @@ reports
 *.egg-info/
 .env
 jyutping.dat
+*.sqlite3

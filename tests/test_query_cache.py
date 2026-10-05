@@ -1,6 +1,8 @@
 import asyncio
 import json
 from pathlib import Path
+import subprocess
+import sys
 from unittest.mock import patch
 
 from fastapi import Request
@@ -9,6 +11,9 @@ from pytest import MonkeyPatch
 
 from yen2pinyin import api
 from yen2pinyin.contracts import TextRequest
+
+
+BUILD_SCRIPT = Path(__file__).resolve().parents[1] / "scripts/build_flashcard_db.py"
 
 
 def test_query_results_reuse_jyutpin_and_approximation(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
@@ -21,7 +26,9 @@ def test_query_results_reuse_jyutpin_and_approximation(tmp_path: Path, monkeypat
   monkeypatch.setenv("YEN2PINYIN_CACHE_PATH", str(tmp_path / "trie.dat"))
   flashcards = tmp_path / "flashcards.yaml"
   flashcards.write_text("metadata: {}\nentries:\n  - headwords: [{word: 你好, readings: [nei5 hou2]}]\n    pos: []\n    sim: []\n    label: []\n    ant: []\n    img: []\n    ref: []\n    definitions: [{explanation: [], eg: [{yue: 你好, jyutpin: nei5 hou2}]}]\n    reviewed: 1\n", encoding="utf-8")
-  monkeypatch.setenv("YEN2PINYIN_FLASHCARD_WORDS_PATH", str(flashcards))
+  database = tmp_path / "flashcards.sqlite3"
+  subprocess.run([sys.executable, str(BUILD_SCRIPT), "--input", str(flashcards), "--output", str(database)], check=True)
+  monkeypatch.setenv("YEN2PINYIN_FLASHCARD_DB_PATH", str(database))
 
   with TestClient(api.app) as client:
     with patch.object(api.app.state.trie, "annotate", wraps=api.app.state.trie.annotate) as lookup:
@@ -67,7 +74,9 @@ def test_independent_lru_eviction_and_lifespan_reset(tmp_path: Path, monkeypatch
   monkeypatch.setenv("YEN2PINYIN_CACHE_PATH", str(tmp_path / "trie.dat"))
   flashcards = tmp_path / "flashcards.yaml"
   flashcards.write_text("metadata: {}\nentries:\n  - headwords: [{word: 你好, readings: [nei5 hou2]}]\n    pos: []\n    sim: []\n    label: []\n    ant: []\n    img: []\n    ref: []\n    definitions: [{explanation: [], eg: [{yue: 你好, jyutpin: nei5 hou2}]}]\n    reviewed: 1\n", encoding="utf-8")
-  monkeypatch.setenv("YEN2PINYIN_FLASHCARD_WORDS_PATH", str(flashcards))
+  database = tmp_path / "flashcards.sqlite3"
+  subprocess.run([sys.executable, str(BUILD_SCRIPT), "--input", str(flashcards), "--output", str(database)], check=True)
+  monkeypatch.setenv("YEN2PINYIN_FLASHCARD_DB_PATH", str(database))
   assert api.QUERY_CACHE_SIZE == 1000
   monkeypatch.setattr(api, "QUERY_CACHE_SIZE", 2)
 
