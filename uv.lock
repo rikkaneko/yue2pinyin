@@ -417,7 +417,7 @@ wheels = [
 ]
 
 [[package]]
-name = "yen2pinyin"
+name = "yue2pinyin"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

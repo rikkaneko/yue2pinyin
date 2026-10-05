@@ -7,7 +7,7 @@ import sys
 import pytest
 from pydantic import ValidationError
 
-from yen2pinyin.api import Settings
+from yue2pinyin.api import Settings
 
 
 def test_cors_settings_accept_supported_origins() -> None:
@@ -34,12 +34,12 @@ def test_cors_settings_reject_malformed_origins(origin: str) -> None:
 
 def test_cors_actual_and_preflight_responses() -> None:
   environment = os.environ.copy()
-  environment["YEN2PINYIN_CORS_ORIGINS"] = (
+  environment["YUE2PINYIN_CORS_ORIGINS"] = (
     "https://app.nekoid.cc,https://*.nekoid.cc,http://localhost:*"
   )
   script = """
 from fastapi.testclient import TestClient
-from yen2pinyin.api import app
+from yue2pinyin.api import app
 
 client = TestClient(app)
 for origin in (
@@ -85,9 +85,9 @@ assert "access-control-allow-origin" not in denied.headers
 
 def test_invalid_cors_environment_rejects_app_start() -> None:
   environment = os.environ.copy()
-  environment["YEN2PINYIN_CORS_ORIGINS"] = "https://example.com/path"
+  environment["YUE2PINYIN_CORS_ORIGINS"] = "https://example.com/path"
   result = subprocess.run(
-    [sys.executable, "-c", "from yen2pinyin.api import app"],
+    [sys.executable, "-c", "from yue2pinyin.api import app"],
     capture_output=True, text=True, env=environment,
   )
   assert result.returncode != 0

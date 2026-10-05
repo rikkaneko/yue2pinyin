@@ -1,6 +1,6 @@
 import pytest
 
-from yen2pinyin.approximation import approximate
+from yue2pinyin.approximation import approximate
 
 
 # Each expectation is the first sound entry in the proofread final table.

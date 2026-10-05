@@ -12,7 +12,7 @@ import sqlite3
 import yaml
 from pydantic import BaseModel, ValidationError, model_validator
 
-from yen2pinyin.contracts import WordDocument
+from yue2pinyin.contracts import WordDocument
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]

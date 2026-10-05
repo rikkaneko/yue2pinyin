@@ -6,7 +6,7 @@ import sys
 from fastapi.testclient import TestClient
 from pytest import MonkeyPatch
 
-from yen2pinyin.api import PROJECT_ROOT, Settings, app
+from yue2pinyin.api import PROJECT_ROOT, Settings, app
 
 
 BUILD_SCRIPT = Path(__file__).resolve().parents[1] / "scripts/build_flashcard_db.py"
@@ -19,15 +19,15 @@ def test_startup_reads_dotenv_from_working_directory(tmp_path: Path, monkeypatch
   subprocess.run([sys.executable, str(BUILD_SCRIPT), "--input", str(tmp_path / "flashcards.yaml"),
                   "--output", str(tmp_path / "flashcards.sqlite3")], check=True)
   (tmp_path / ".env").write_text(
-    "YEN2PINYIN_WORDS_PATH=words.csv\n"
-    "YEN2PINYIN_CHARACTERS_PATH=characters.json\n"
-    "YEN2PINYIN_CACHE_PATH=cache.dat\n"
-    "YEN2PINYIN_FLASHCARD_DB_PATH=flashcards.sqlite3\n"
-    "YEN2PINYIN_CORS_ORIGINS=http://localhost:*\n",
+    "YUE2PINYIN_WORDS_PATH=words.csv\n"
+    "YUE2PINYIN_CHARACTERS_PATH=characters.json\n"
+    "YUE2PINYIN_CACHE_PATH=cache.dat\n"
+    "YUE2PINYIN_FLASHCARD_DB_PATH=flashcards.sqlite3\n"
+    "YUE2PINYIN_CORS_ORIGINS=http://localhost:*\n",
     encoding="utf-8",
   )
   for key in ("WORDS_PATH", "CHARACTERS_PATH", "CACHE_PATH", "FLASHCARD_DB_PATH"):
-    monkeypatch.delenv(f"YEN2PINYIN_{key}", raising=False)
+    monkeypatch.delenv(f"YUE2PINYIN_{key}", raising=False)
   monkeypatch.chdir(tmp_path)
   with TestClient(app) as client:
     assert client.post("/jyutpin", json={"text": "你好"}).json()["jyutpin_words"] == ["nei5 hou2"]
@@ -37,19 +37,19 @@ def test_startup_reads_dotenv_from_working_directory(tmp_path: Path, monkeypatch
 
 def test_environment_override_and_missing_dotenv(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
   (tmp_path / ".env").write_text(
-    "YEN2PINYIN_WORDS_PATH=from-file.csv\n"
-    "YEN2PINYIN_CACHE_PATH=from-file.dat\n",
+    "YUE2PINYIN_WORDS_PATH=from-file.csv\n"
+    "YUE2PINYIN_CACHE_PATH=from-file.dat\n",
     encoding="utf-8",
   )
   for key in ("WORDS_PATH", "CHARACTERS_PATH", "CACHE_PATH", "FLASHCARD_DB_PATH"):
-    monkeypatch.delenv(f"YEN2PINYIN_{key}", raising=False)
+    monkeypatch.delenv(f"YUE2PINYIN_{key}", raising=False)
   monkeypatch.chdir(tmp_path)
-  monkeypatch.setenv("YEN2PINYIN_WORDS_PATH", "from-process.csv")
+  monkeypatch.setenv("YUE2PINYIN_WORDS_PATH", "from-process.csv")
   settings = Settings(_env_file=Path.cwd() / ".env")
   assert settings.words_path == Path("from-process.csv")
   assert settings.cache_path == Path("from-file.dat")
 
-  monkeypatch.delenv("YEN2PINYIN_WORDS_PATH")
+  monkeypatch.delenv("YUE2PINYIN_WORDS_PATH")
   empty_directory = tmp_path / "no-env"
   empty_directory.mkdir()
   monkeypatch.chdir(empty_directory)
@@ -57,6 +57,6 @@ def test_environment_override_and_missing_dotenv(tmp_path: Path, monkeypatch: Mo
   defaults = Settings(_env_file=Path.cwd() / ".env")
   assert defaults.words_path == PROJECT_ROOT / "assests/rime-cantonese/jyut6ping3.words.dict.csv"
   assert defaults.characters_path == PROJECT_ROOT / "assests/words-hk/charlist.json"
-  assert defaults.cache_path == Path("/tmp/yen2pinyin/jyutping.dat")
-  assert defaults.flashcard_db_path == PROJECT_ROOT / "assests/words-hk/all-latest.sqlite3"
+  assert defaults.cache_path == PROJECT_ROOT / "jyutping.dat"
+  assert defaults.flashcard_db_path == PROJECT_ROOT / "words.sqlite3"
   assert defaults.cors_origins == []

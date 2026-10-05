@@ -7,7 +7,7 @@ import yaml
 from fastapi.testclient import TestClient
 from pytest import MonkeyPatch
 
-from yen2pinyin.api import app
+from yue2pinyin.api import app
 
 
 BUILD_SCRIPT = Path(__file__).resolve().parents[1] / "scripts/build_flashcard_db.py"
@@ -18,17 +18,17 @@ def test_routes_and_alignment(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
   characters = tmp_path / "characters.json"
   words.write_text("words,jyutpin\n你好,nei5 hou2\n啦好,la1 hou2\n", encoding="utf-8")
   characters.write_text(json.dumps({"你": {"nei5": 1}, "好": {"hou2": 1}}), encoding="utf-8")
-  monkeypatch.setenv("YEN2PINYIN_WORDS_PATH", str(words))
-  monkeypatch.setenv("YEN2PINYIN_CHARACTERS_PATH", str(characters))
-  monkeypatch.setenv("YEN2PINYIN_CACHE_PATH", str(tmp_path / "cache.dat"))
+  monkeypatch.setenv("YUE2PINYIN_WORDS_PATH", str(words))
+  monkeypatch.setenv("YUE2PINYIN_CHARACTERS_PATH", str(characters))
+  monkeypatch.setenv("YUE2PINYIN_CACHE_PATH", str(tmp_path / "cache.dat"))
   flashcards = tmp_path / "flashcards.yaml"
   flashcards.write_text("metadata: {}\nentries:\n  - headwords: [{word: 你好, readings: [nei5 hou2]}]\n    pos: []\n    sim: []\n    label: []\n    ant: []\n    img: []\n    ref: []\n    definitions: [{explanation: [], eg: [{yue: 你好, jyutpin: nei5 hou2}]}]\n    reviewed: 1\n", encoding="utf-8")
   database = tmp_path / "flashcards.sqlite3"
   subprocess.run([sys.executable, str(BUILD_SCRIPT), "--input", str(flashcards), "--output", str(database)], check=True)
-  monkeypatch.setenv("YEN2PINYIN_FLASHCARD_DB_PATH", str(database))
+  monkeypatch.setenv("YUE2PINYIN_FLASHCARD_DB_PATH", str(database))
   with TestClient(app) as client:
     schema = client.get("/openapi.json").json()
-    assert schema["info"]["title"] == "yen2pinyin"
+    assert schema["info"]["title"] == "yue2pinyin"
     assert "/jyutpin" in schema["paths"]
     assert "/approx_pinyin" in schema["paths"]
     sample = "你好，啦好!你 龘"
@@ -98,12 +98,12 @@ def test_flashcard_readings_and_direct_jyutpin(tmp_path: Path, monkeypatch: Monk
     "definitions": [{"explanation": [], "eg": []}], "reviewed": 1,
   })
   flashcards.write_text(yaml.safe_dump({"metadata": {}, "entries": entries}, allow_unicode=True), encoding="utf-8")
-  monkeypatch.setenv("YEN2PINYIN_WORDS_PATH", str(words))
-  monkeypatch.setenv("YEN2PINYIN_CHARACTERS_PATH", str(characters))
+  monkeypatch.setenv("YUE2PINYIN_WORDS_PATH", str(words))
+  monkeypatch.setenv("YUE2PINYIN_CHARACTERS_PATH", str(characters))
   database = tmp_path / "flashcards.sqlite3"
   subprocess.run([sys.executable, str(BUILD_SCRIPT), "--input", str(flashcards), "--output", str(database)], check=True)
-  monkeypatch.setenv("YEN2PINYIN_FLASHCARD_DB_PATH", str(database))
-  monkeypatch.setenv("YEN2PINYIN_CACHE_PATH", str(tmp_path / "trie.dat"))
+  monkeypatch.setenv("YUE2PINYIN_FLASHCARD_DB_PATH", str(database))
+  monkeypatch.setenv("YUE2PINYIN_CACHE_PATH", str(tmp_path / "trie.dat"))
 
   with TestClient(app) as client:
     result = client.post("/approx_pinyin", json={"text": "你好HELLO，新詞!"}).json()

@@ -9,7 +9,7 @@ import yaml
 from fastapi.testclient import TestClient
 from pytest import MonkeyPatch
 
-from yen2pinyin.api import WordCatalog, app
+from yue2pinyin.api import WordCatalog, app
 
 
 BUILD_SCRIPT = Path(__file__).resolve().parents[1] / "scripts/build_flashcard_db.py"
@@ -46,22 +46,22 @@ def test_word_route_returns_complete_eligible_record(tmp_path: Path, monkeypatch
   words.write_text("words,jyutpin\n你好,nei5 hou2\n", encoding="utf-8")
   characters = tmp_path / "characters.json"
   characters.write_text("{}", encoding="utf-8")
-  monkeypatch.setenv("YEN2PINYIN_WORDS_PATH", str(words))
-  monkeypatch.setenv("YEN2PINYIN_CHARACTERS_PATH", str(characters))
-  monkeypatch.setenv("YEN2PINYIN_CACHE_PATH", str(tmp_path / "trie.dat"))
+  monkeypatch.setenv("YUE2PINYIN_WORDS_PATH", str(words))
+  monkeypatch.setenv("YUE2PINYIN_CHARACTERS_PATH", str(characters))
+  monkeypatch.setenv("YUE2PINYIN_CACHE_PATH", str(tmp_path / "trie.dat"))
   database = tmp_path / "words.sqlite3"
   subprocess.run([sys.executable, str(BUILD_SCRIPT), "--input", str(source), "--output", str(database)], check=True)
-  monkeypatch.setenv("YEN2PINYIN_FLASHCARD_DB_PATH", str(database))
+  monkeypatch.setenv("YUE2PINYIN_FLASHCARD_DB_PATH", str(database))
 
   with TestClient(app) as client:
     schema = client.get("/openapi.json").json()
     assert "/word" in schema["paths"]
     assert app.state.word_catalog.eligible_count == 2
-    with patch("yen2pinyin.api.randrange", return_value=1) as chosen:
+    with patch("yue2pinyin.api.randrange", return_value=1) as chosen:
       assert client.get("/word").json() == valid
       assert chosen.call_count == 1
       assert chosen.call_args.args == (1, 3)
-    with patch("yen2pinyin.api.randrange", return_value=2):
+    with patch("yue2pinyin.api.randrange", return_value=2):
       assert client.get("/word").json() == second
     assert client.get("/").status_code == 404
     assert client.get("/assets/app.js").status_code == 404
@@ -100,10 +100,10 @@ def test_flashcard_source_failures_are_explicit(tmp_path: Path, monkeypatch: Mon
   words.write_text("words,jyutpin\n你好,nei5 hou2\n", encoding="utf-8")
   characters = tmp_path / "characters.json"
   characters.write_text("{}", encoding="utf-8")
-  monkeypatch.setenv("YEN2PINYIN_WORDS_PATH", str(words))
-  monkeypatch.setenv("YEN2PINYIN_CHARACTERS_PATH", str(characters))
-  monkeypatch.setenv("YEN2PINYIN_CACHE_PATH", str(tmp_path / "trie.dat"))
-  monkeypatch.setenv("YEN2PINYIN_FLASHCARD_DB_PATH", str(missing))
+  monkeypatch.setenv("YUE2PINYIN_WORDS_PATH", str(words))
+  monkeypatch.setenv("YUE2PINYIN_CHARACTERS_PATH", str(characters))
+  monkeypatch.setenv("YUE2PINYIN_CACHE_PATH", str(tmp_path / "trie.dat"))
+  monkeypatch.setenv("YUE2PINYIN_FLASHCARD_DB_PATH", str(missing))
   with pytest.raises(RuntimeError, match="Cannot load flashcard database"):
     with TestClient(app):
       pass

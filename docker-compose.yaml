@@ -1,5 +1,5 @@
 services:
-  yen2pinyin:
+  yue2pinyin:
     build: .
     env_file:
       - .env

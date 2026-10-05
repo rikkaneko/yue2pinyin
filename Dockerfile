@@ -4,7 +4,7 @@ FROM python:3.14-slim
 
 WORKDIR /app
 COPY pyproject.toml ./
-COPY yen2pinyin ./yen2pinyin
+COPY yue2pinyin ./yue2pinyin
 RUN --mount=type=cache,target=/root/.cache/pip pip install .
 COPY assests ./assests
 COPY scripts/build_flashcard_db.py ./scripts/build_flashcard_db.py
@@ -19,4 +19,4 @@ RUN --mount=type=bind,source=.,target=/build-context,readonly \
 RUN useradd --system --uid 10001 appuser && chown -R appuser:appuser /app;
 USER appuser
 EXPOSE 8000
-CMD ["sh", "-c", "exec uvicorn yen2pinyin.api:app --host 0.0.0.0 --port \"${YEN2PINYIN_PORT:-8000}\";"]
+CMD ["sh", "-c", "exec uvicorn yue2pinyin.api:app --host 0.0.0.0 --port \"${YUE2PINYIN_PORT:-8000}\";"]

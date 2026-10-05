@@ -3,7 +3,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 import zlib
 
-from yen2pinyin.trie import CACHE_VERSION, PronunciationTrie
+from yue2pinyin.trie import CACHE_VERSION, PronunciationTrie
 
 
 def test_longest_match_boundaries_and_frequency(tmp_path: Path) -> None:

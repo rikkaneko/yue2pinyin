@@ -13,12 +13,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
-from yen2pinyin.approximation import approximate
-from yen2pinyin.contracts import (
+from yue2pinyin.approximation import approximate
+from yue2pinyin.contracts import (
   ApproximationValue, ApproxPinyinResponse, DirectApproxPinyinResponse, JyutpinRequest,
   JyutpinResponse, JyutpinValue, TextRequest, WordEntry,
 )
-from yen2pinyin.trie import PronunciationTrie
+from yue2pinyin.trie import PronunciationTrie
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -29,7 +29,7 @@ ANY_VALID_PORT = r":(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]
 
 
 class Settings(BaseSettings):
-  model_config = SettingsConfigDict(env_prefix="YEN2PINYIN_", extra="ignore")
+  model_config = SettingsConfigDict(env_prefix="YUE2PINYIN_", extra="ignore")
 
   words_path: Path = PROJECT_ROOT / "assests/rime-cantonese/jyut6ping3.words.dict.csv"
   characters_path: Path = PROJECT_ROOT / "assests/words-hk/charlist.json"
@@ -107,7 +107,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     app.state.word_catalog.close()
 
 
-app = FastAPI(title="yen2pinyin", lifespan=lifespan)
+app = FastAPI(title="yue2pinyin", lifespan=lifespan)
 
 # Build an exact-origin list and a single anchored regex for the supported wildcard forms.
 cors_settings = Settings(_env_file=Path.cwd() / ".env")

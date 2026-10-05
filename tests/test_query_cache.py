@@ -9,8 +9,8 @@ from fastapi import Request
 from fastapi.testclient import TestClient
 from pytest import MonkeyPatch
 
-from yen2pinyin import api
-from yen2pinyin.contracts import TextRequest
+from yue2pinyin import api
+from yue2pinyin.contracts import TextRequest
 
 
 BUILD_SCRIPT = Path(__file__).resolve().parents[1] / "scripts/build_flashcard_db.py"
@@ -21,14 +21,14 @@ def test_query_results_reuse_jyutpin_and_approximation(tmp_path: Path, monkeypat
   characters = tmp_path / "characters.json"
   words.write_text("words,jyutpin\n你好,nei5 hou2\n", encoding="utf-8")
   characters.write_text(json.dumps({"你": {"nei5": 1}}), encoding="utf-8")
-  monkeypatch.setenv("YEN2PINYIN_WORDS_PATH", str(words))
-  monkeypatch.setenv("YEN2PINYIN_CHARACTERS_PATH", str(characters))
-  monkeypatch.setenv("YEN2PINYIN_CACHE_PATH", str(tmp_path / "trie.dat"))
+  monkeypatch.setenv("YUE2PINYIN_WORDS_PATH", str(words))
+  monkeypatch.setenv("YUE2PINYIN_CHARACTERS_PATH", str(characters))
+  monkeypatch.setenv("YUE2PINYIN_CACHE_PATH", str(tmp_path / "trie.dat"))
   flashcards = tmp_path / "flashcards.yaml"
   flashcards.write_text("metadata: {}\nentries:\n  - headwords: [{word: 你好, readings: [nei5 hou2]}]\n    pos: []\n    sim: []\n    label: []\n    ant: []\n    img: []\n    ref: []\n    definitions: [{explanation: [], eg: [{yue: 你好, jyutpin: nei5 hou2}]}]\n    reviewed: 1\n", encoding="utf-8")
   database = tmp_path / "flashcards.sqlite3"
   subprocess.run([sys.executable, str(BUILD_SCRIPT), "--input", str(flashcards), "--output", str(database)], check=True)
-  monkeypatch.setenv("YEN2PINYIN_FLASHCARD_DB_PATH", str(database))
+  monkeypatch.setenv("YUE2PINYIN_FLASHCARD_DB_PATH", str(database))
 
   with TestClient(api.app) as client:
     with patch.object(api.app.state.trie, "annotate", wraps=api.app.state.trie.annotate) as lookup:
@@ -69,14 +69,14 @@ def test_independent_lru_eviction_and_lifespan_reset(tmp_path: Path, monkeypatch
   characters = tmp_path / "characters.json"
   words.write_text("words,jyutpin\n你好,nei5 hou2\n", encoding="utf-8")
   characters.write_text("{}", encoding="utf-8")
-  monkeypatch.setenv("YEN2PINYIN_WORDS_PATH", str(words))
-  monkeypatch.setenv("YEN2PINYIN_CHARACTERS_PATH", str(characters))
-  monkeypatch.setenv("YEN2PINYIN_CACHE_PATH", str(tmp_path / "trie.dat"))
+  monkeypatch.setenv("YUE2PINYIN_WORDS_PATH", str(words))
+  monkeypatch.setenv("YUE2PINYIN_CHARACTERS_PATH", str(characters))
+  monkeypatch.setenv("YUE2PINYIN_CACHE_PATH", str(tmp_path / "trie.dat"))
   flashcards = tmp_path / "flashcards.yaml"
   flashcards.write_text("metadata: {}\nentries:\n  - headwords: [{word: 你好, readings: [nei5 hou2]}]\n    pos: []\n    sim: []\n    label: []\n    ant: []\n    img: []\n    ref: []\n    definitions: [{explanation: [], eg: [{yue: 你好, jyutpin: nei5 hou2}]}]\n    reviewed: 1\n", encoding="utf-8")
   database = tmp_path / "flashcards.sqlite3"
   subprocess.run([sys.executable, str(BUILD_SCRIPT), "--input", str(flashcards), "--output", str(database)], check=True)
-  monkeypatch.setenv("YEN2PINYIN_FLASHCARD_DB_PATH", str(database))
+  monkeypatch.setenv("YUE2PINYIN_FLASHCARD_DB_PATH", str(database))
   assert api.QUERY_CACHE_SIZE == 1000
   monkeypatch.setattr(api, "QUERY_CACHE_SIZE", 2)
 
