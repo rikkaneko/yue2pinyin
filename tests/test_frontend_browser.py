@@ -3,6 +3,7 @@
 import json
 import os
 import subprocess
+from urllib.parse import urljoin
 
 import pytest
 from pydantic import AnyHttpUrl, TypeAdapter
@@ -23,7 +24,7 @@ def test_frontend_interactions() -> None:
 
   for command in (
     ["open", base_url],
-    ["eval", "document.title === '粵語發音助手' && Boolean(window.jQuery) && Boolean(window.CANTONESE_TUTOR_CONFIG)"],
+    ["eval", "document.title === '粵語發音轉換' && Boolean(window.jQuery) && Boolean(window.CANTONESE_TUTOR_CONFIG)"],
   ):
     result = subprocess.run([*session, *command], capture_output=True, text=True, check=True)
     if command[0] == "eval":
@@ -170,12 +171,38 @@ def test_frontend_interactions() -> None:
   assert json.loads(pronunciation_error.stdout) is True
   subprocess.run([*session, "network", "unroute"], check=True, capture_output=True)
 
-  subprocess.run([*session, "network", "route", "**/config.js", "--body", (
-    "window.CANTONESE_TUTOR_CONFIG = { apiBaseUrl: 'ftp://invalid.example' };"
-  )], check=True, capture_output=True)
-  subprocess.run([*session, "open", base_url], check=True, capture_output=True)
-  subprocess.run([*session, "wait", "--text", "API 網址設定無效"], check=True, capture_output=True)
-  invalid_config = subprocess.run([*session, "eval", "document.querySelector('#analyze-button').disabled && document.querySelector('#next-word').disabled"], capture_output=True, text=True, check=True)
-  assert json.loads(invalid_config.stdout) is True
-  subprocess.run([*session, "network", "unroute"], check=True, capture_output=True)
+  # Both local path forms must keep each API endpoint under the configured path.
+  for path in ("/api", "./api"):
+    subprocess.run([*session, "network", "route", "**/config.js", "--body", (
+      f"window.CANTONESE_TUTOR_CONFIG = {{ apiBaseUrl: '{path}' }};"
+    )], check=True, capture_output=True)
+    subprocess.run([*session, "open", base_url], check=True, capture_output=True)
+    enabled = subprocess.run([*session, "eval", "!document.querySelector('#analyze-button').disabled && !document.querySelector('#next-word').disabled"], capture_output=True, text=True, check=True)
+    assert json.loads(enabled.stdout) is True
+    subprocess.run([*session, "eval", (
+      "window.__requestedUrls = []; window.fetch = async (url) => { window.__requestedUrls.push(String(url)); "
+      "return new Response('', { status: 503 }); }; "
+      "document.querySelector('#cantonese-input').value = '你好'; "
+      "document.querySelector('#analyze-button').click(); "
+      "document.querySelector('[data-view=flashcard]').click();"
+    )], check=True, capture_output=True)
+    requested = subprocess.run([*session, "eval", "window.__requestedUrls"], capture_output=True, text=True, check=True)
+    assert json.loads(requested.stdout) == [
+      urljoin(base_url, f"{path}/approx_pinyin"),
+      urljoin(base_url, f"{path}/word"),
+    ]
+    subprocess.run([*session, "network", "unroute"], check=True, capture_output=True)
+
+  # Invalid schemes and URL components must leave both API actions disabled.
+  for value in ("ftp://invalid.example", "//invalid.example/api", "\\\\invalid.example/api",
+                "https:invalid.example/api", "https://user:pass@invalid.example/api",
+                "/api?token=abc", "/api#fragment", "http://[", ""):
+    subprocess.run([*session, "network", "route", "**/config.js", "--body", (
+      f"window.CANTONESE_TUTOR_CONFIG = {{ apiBaseUrl: {json.dumps(value)} }};"
+    )], check=True, capture_output=True)
+    subprocess.run([*session, "open", base_url], check=True, capture_output=True)
+    subprocess.run([*session, "wait", "--text", "API 網址設定無效"], check=True, capture_output=True)
+    invalid_config = subprocess.run([*session, "eval", "document.querySelector('#analyze-button').disabled && document.querySelector('#next-word').disabled"], capture_output=True, text=True, check=True)
+    assert json.loads(invalid_config.stdout) is True
+    subprocess.run([*session, "network", "unroute"], check=True, capture_output=True)
   subprocess.run([*session, "close"], check=True, capture_output=True)

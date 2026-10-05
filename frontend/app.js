@@ -1,14 +1,23 @@
 import { z } from 'https://cdn.jsdelivr.net/npm/zod@4.4.3/+esm';
 
 const $ = window.jQuery;
-const configSchema = z.object({ apiBaseUrl: z.string().url() });
+const configSchema = z.object({ apiBaseUrl: z.string().trim().min(1) });
 const parsedConfig = configSchema.safeParse(window.CANTONESE_TUTOR_CONFIG);
 let apiBaseUrl = null;
-if (parsedConfig.success) {
-  const candidate = new URL(parsedConfig.data.apiBaseUrl);
-  if (['http:', 'https:'].includes(candidate.protocol) && !candidate.username && !candidate.password &&
-      !candidate.search && !candidate.hash) {
-    apiBaseUrl = new URL(candidate.href.endsWith('/') ? candidate.href : `${candidate.href}/`);
+const configuredUrl = parsedConfig.success ? parsedConfig.data.apiBaseUrl : '';
+const fullUrl = /^https?:\/\//i.test(configuredUrl);
+const relativePath = !/^[a-z][a-z\d+.-]*:/i.test(configuredUrl) &&
+  !configuredUrl.startsWith('//') && !configuredUrl.startsWith('\\');
+if (parsedConfig.success && (fullUrl || relativePath)) {
+  try {
+    // Resolve local API paths from the page while keeping endpoint names under the configured base path.
+    const candidate = new URL(configuredUrl, window.location.href);
+    if (['http:', 'https:'].includes(candidate.protocol) && !candidate.username && !candidate.password &&
+        !candidate.search && !candidate.hash && (fullUrl || candidate.origin === window.location.origin)) {
+      apiBaseUrl = new URL(candidate.href.endsWith('/') ? candidate.href : `${candidate.href}/`);
+    }
+  } catch {
+    // Malformed configuration leaves API actions disabled below.
   }
 }
 
