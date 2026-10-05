@@ -45,8 +45,8 @@ def test_routes_and_alignment(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     assert result["jyutpin"] == ["nei5", "hou2", None, "la1", "hou2", None, "nei5", None, None]
     assert result["words"] == ["你好", "，", "啦好", "!", "你", " ", "龘"]
     assert result["jyutpin_words"] == ["nei5 hou2", None, "la1 hou2", None, "nei5", None, None]
-    assert result["approx_pinyin"] == ["nei2", "hao2", None, None, "hao2", None, "nei2", None, None]
-    assert result["approx_pinyin_words"] == ["nei2 hao2", None, None, None, "nei2", None, None]
+    assert result["approx_pinyin"] == ["nei2", "hou2", None, None, "hou2", None, "nei2", None, None]
+    assert result["approx_pinyin_words"] == ["nei2 hou2", None, None, None, "nei2", None, None]
     assert len(result["hint"]) == len(sample)
     assert result["hint"][-2:] == [None, None]
     assert client.post("/approx_pinyin", json={"text": ""}).json() == {
@@ -67,8 +67,8 @@ def test_routes_and_alignment(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
       assert len(separated["text"]) == len(separated["jyutpin"]) == len(boundaries)
       if route == "/approx_pinyin":
         assert separated["approx_pinyin_words"] == [
-          None, None, "nei2", None, "hao2", None, "nei2 hao2", None,
-          "nei2 hao2", None, "nei2 hao2", None, None,
+          None, None, "nei2", None, "hou2", None, "nei2 hou2", None,
+          "nei2 hou2", None, "nei2 hou2", None, None,
         ]
     assert client.post("/jyutpin", json={"text": 5}).status_code == 422
     assert client.post("/jyutpin", json={"text": "你", "extra": True}).status_code == 422
@@ -111,9 +111,9 @@ def test_flashcard_readings_and_direct_jyutpin(tmp_path: Path, monkeypatch: Monk
     assert result["words"] == ["你好", "HELLO", "，", "新詞", "!"]
     assert result["jyutpin"] == ["nei5", "hou2", ["haa1", "lou3"], None, "san1", "ci4", None]
     assert result["jyutpin_words"] == ["nei5 hou2", ["haa1", "lou3"], None, "san1 ci4", None]
-    assert result["approx_pinyin"][2] == ["ha1", "lao1"]
-    assert result["approx_pinyin_words"][1] == ["ha1", "lao1"]
-    assert result["hint"][2] == ["喉音起聲", ""]
+    assert result["approx_pinyin"][2] == ["ha1", "lou1"]
+    assert result["approx_pinyin_words"][1] == ["ha1", "lou1"]
+    assert result["hint"][2] == ["聲門開啟，喉部送氣", ""]
     assert client.post("/jyutpin", json={"text": "HeLlO OK啦"}).json()["text"] == ["HeLlO", " ", "OK", "啦"]
     assert client.post("/jyutpin", json={"text": "HeLlO OK啦"}).json()["jyutpin"] == [
       ["haa1", "lou3"], None, None, None,
@@ -123,7 +123,7 @@ def test_flashcard_readings_and_direct_jyutpin(tmp_path: Path, monkeypatch: Monk
     assert partial["jyutpin"] == [["haa1", "xyz1"], None, "haa1"]
     assert partial["approx_pinyin"] == [["ha1", None], None, "ha1"]
     assert partial["approx_pinyin_words"] == [["ha1", None], None, "ha1"]
-    assert partial["hint"] == [["喉音起聲", None], None, "喉音起聲"]
+    assert partial["hint"] == [["聲門開啟，喉部送氣", None], None, "聲門開啟，喉部送氣"]
 
     direct = client.post("/approx_pinyin", json={
       "jyutpin": ["nei5", "haa1 lou3", ["so1", "wi4"], ["haa1"], None, "", "xyz1", "haa1 xyz1"],
@@ -131,9 +131,9 @@ def test_flashcard_readings_and_direct_jyutpin(tmp_path: Path, monkeypatch: Monk
     assert direct.status_code == 200
     assert direct.json() == {
       "jyutpin": ["nei5", ["haa1", "lou3"], ["so1", "wi4"], ["haa1"], None, "", "xyz1", ["haa1", "xyz1"]],
-      "approx_pinyin": ["nei2", ["ha1", "lao1"], ["so1", "wi3"], ["ha1"], None, None, None, ["ha1", None]],
-      "hint": ["", ["喉音起聲", ""], ["舌葉音起聲", ""], ["喉音起聲"], None, None, None,
-               ["喉音起聲", None]],
+      "approx_pinyin": ["nei2", ["ha1", "lou1"], ["so1", "wi3"], ["ha1"], None, None, None, ["ha1", None]],
+      "hint": ["", ["聲門開啟，喉部送氣", ""], ["舌葉平鋪，不捲舌", ""], ["聲門開啟，喉部送氣"], None, None, None,
+               ["聲門開啟，喉部送氣", None]],
     }
     assert client.post("/approx_pinyin", json={"jyutpin": []}).json() == {
       "jyutpin": [], "approx_pinyin": [], "hint": [],
