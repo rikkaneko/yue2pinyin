@@ -19,18 +19,18 @@ def test_frontend_interactions() -> None:
   if "BROWSER_TEST_API_URL" in os.environ:
     # Override only the static config response when the local API uses a test port.
     subprocess.run([*session, "network", "route", "**/config.js", "--body", (
-      f"window.CANTONESE_TUTOR_CONFIG = Object.freeze({{ apiBaseUrl: '{api_url}' }});"
+      f"window.YUE2PINYIN_CONFIG = Object.freeze({{ apiBaseUrl: '{api_url}' }});"
     )], check=True, capture_output=True)
 
   for command in (
     ["open", base_url],
-    ["eval", "document.title === '粵語發音轉換' && Boolean(window.jQuery) && Boolean(window.CANTONESE_TUTOR_CONFIG)"],
+    ["eval", "document.title === '粵語發音轉換' && Boolean(window.jQuery) && Boolean(window.YUE2PINYIN_CONFIG)"],
   ):
     result = subprocess.run([*session, *command], capture_output=True, text=True, check=True)
     if command[0] == "eval":
       assert json.loads(result.stdout) is True
 
-  configured = subprocess.run([*session, "eval", "window.CANTONESE_TUTOR_CONFIG.apiBaseUrl"], capture_output=True, text=True, check=True)
+  configured = subprocess.run([*session, "eval", "window.YUE2PINYIN_CONFIG.apiBaseUrl"], capture_output=True, text=True, check=True)
   assert json.loads(configured.stdout).rstrip("/") == api_url
   assets = subprocess.run([*session, "eval", "['./style.css', './config.js', './app.js'].every(path => document.querySelector(`[href=\"${path}\"], [src=\"${path}\"]`) && new URL(path, location.href).origin === location.origin)"], capture_output=True, text=True, check=True)
   assert json.loads(assets.stdout) is True
@@ -51,6 +51,24 @@ def test_frontend_interactions() -> None:
   assert json.loads(rendered.stdout) == "你好，👋"
   order = subprocess.run([*session, "eval", "document.querySelector('#pronunciation-result .word-card').children[0].classList.contains('approx')"], capture_output=True, text=True, check=True)
   assert json.loads(order.stdout) is True
+
+  # The shared control refreshes visible text, including a syllabic m with no vowel.
+  subprocess.run([*session, "eval", "document.querySelector('#cantonese-input').value = '唔'; document.querySelector('#analyze-button').click();"], check=True, capture_output=True)
+  subprocess.run([*session, "wait", "#pronunciation-result .approx"], check=True, capture_output=True)
+  default_reading = subprocess.run([*session, "eval", "({checked: document.querySelector('#allow-invalid-pinyin').checked, text: document.querySelector('#pronunciation-result .approx').textContent})"], capture_output=True, text=True, check=True)
+  assert json.loads(default_reading.stdout) == {"checked": False, "text": "mǔ"}
+  subprocess.run([*session, "eval", "document.querySelector('#allow-invalid-pinyin').click()"], check=True, capture_output=True)
+  subprocess.run([*session, "wait", "--text", "m̌"], check=True, capture_output=True)
+  literal_reading = subprocess.run([*session, "eval", "document.querySelector('#pronunciation-result .approx').textContent"], capture_output=True, text=True, check=True)
+  assert json.loads(literal_reading.stdout) == "m̌"
+  subprocess.run([*session, "eval", "document.querySelector('#allow-invalid-pinyin').click()"], check=True, capture_output=True)
+  subprocess.run([*session, "wait", "--text", "mǔ"], check=True, capture_output=True)
+  # The slower first toggle must not overwrite the newer selection.
+  subprocess.run([*session, "eval", "window.__originalFetch = window.fetch; window.__modes = []; window.fetch = async (input, options) => { if (new URL(input).pathname === '/approx_pinyin') { const mode = JSON.parse(options.body).allow_invalid_pinyin; window.__modes.push(mode); await new Promise(resolve => setTimeout(resolve, mode ? 180 : 10)); } return window.__originalFetch(input, options); }; document.querySelector('#allow-invalid-pinyin').click(); document.querySelector('#allow-invalid-pinyin').click();"], check=True, capture_output=True)
+  subprocess.run([*session, "wait", "220"], check=True, capture_output=True)
+  newest = subprocess.run([*session, "eval", "({modes: window.__modes, checked: document.querySelector('#allow-invalid-pinyin').checked, reading: document.querySelector('#pronunciation-result .approx').textContent})"], capture_output=True, text=True, check=True)
+  assert json.loads(newest.stdout) == {"modes": [True, False], "checked": False, "reading": "mǔ"}
+  subprocess.run([*session, "eval", "window.fetch = window.__originalFetch; delete window.__originalFetch; delete window.__modes;"], check=True, capture_output=True)
 
   subprocess.run([*session, "eval", "document.querySelector('#cantonese-input').value = 'x'.repeat(2001); document.querySelector('#analyze-button').click();"], check=True, capture_output=True)
   invalid = subprocess.run([*session, "eval", "document.querySelector('#pronunciation-status').classList.contains('error')"], capture_output=True, text=True, check=True)
@@ -90,13 +108,32 @@ def test_frontend_interactions() -> None:
     "controls": [[True, True, True], *([[False, False, False]] * 4), [True, True, True], *([[False, False, False]] * 2)],
   }
   latin_reading = subprocess.run([*session, "eval", "(() => { const card = Array.from(document.querySelectorAll('#pronunciation-result .word-card')).find(node => node.querySelector('.word-trigger')?.textContent === 'HELLO'); return {word: card?.querySelector('.word-trigger')?.textContent, approx: card?.querySelector('.approx')?.textContent, jyutpin: card?.querySelector('.jyutpin')?.textContent, hints: Array.from(card?.querySelectorAll('.word-hint-content p') ?? []).map(node => ({label: node.querySelector('strong')?.textContent, cue: node.textContent}))}; })()"], capture_output=True, text=True, check=True)
-  assert json.loads(latin_reading.stdout) == {"word": "HELLO", "approx": "ha1 lao3", "jyutpin": "haa1 lou3", "hints": [{"label": "ha1", "cue": "ha1first sound cue"}, {"label": "lao3", "cue": "lao3second sound cue"}]}
+  assert json.loads(latin_reading.stdout) == {"word": "HELLO", "approx": "hā lǎo", "jyutpin": "haa1 lou3", "hints": [{"label": "hā", "cue": "hāfirst sound cue"}, {"label": "lǎo", "cue": "lǎosecond sound cue"}]}
+  subprocess.run([*session, "eval", "window.fetch = window.__originalFetch; delete window.__originalFetch;"], check=True, capture_output=True)
+
+  tone_fixture = {
+    "text": ["TONE"], "words": ["TONE"], "jyutpin": [["ziu2", "deoi4", "m4"]],
+    "jyutpin_words": [["ziu2", "deoi4", "m4"]],
+    "approx_pinyin": [["jiu2", "dui3", "m3"]],
+    "approx_pinyin_words": [["jiu2", "dui3", "m3"]],
+    "hint": [["", "", ""]],
+  }
+  subprocess.run([*session, "eval", (
+    "window.__originalFetch = window.fetch; "
+    "window.fetch = async (input, options) => new URL(input).pathname === '/approx_pinyin' "
+    f"? new Response(JSON.stringify({json.dumps(tone_fixture)}), {{ status: 200, headers: {{ 'Content-Type': 'application/json' }} }}) "
+    ": window.__originalFetch(input, options); "
+    "document.querySelector('#cantonese-input').value = 'TONE'; document.querySelector('#analyze-button').click();"
+  )], check=True, capture_output=True)
+  subprocess.run([*session, "wait", "#pronunciation-result .approx"], check=True, capture_output=True)
+  marked_tones = subprocess.run([*session, "eval", "document.querySelector('#pronunciation-result .approx').textContent"], capture_output=True, text=True, check=True)
+  assert json.loads(marked_tones.stdout) == "jiú duǐ m̌"
   subprocess.run([*session, "eval", "window.fetch = window.__originalFetch; delete window.__originalFetch;"], check=True, capture_output=True)
 
   subprocess.run([*session, "eval", "document.querySelector('#cantonese-input').value = '三甲'; document.querySelector('#analyze-button').click();"], check=True, capture_output=True)
   subprocess.run([*session, "wait", "#pronunciation-result .word-trigger"], check=True, capture_output=True)
   aligned = subprocess.run([*session, "eval", "({lines: Array.from(document.querySelector('#pronunciation-result .word-card').children).filter(node => !node.hidden && !node.classList.contains('speak-word')).map(node => node.textContent), hints: Array.from(document.querySelectorAll('#pronunciation-result .word-hint-content p')).map(node => node.querySelector('strong').textContent)})"], capture_output=True, text=True, check=True)
-  assert json.loads(aligned.stdout) == {"lines": ["san1 ga'1", "saam1 gaap3", "三甲"], "hints": ["三", "甲"]}
+  assert json.loads(aligned.stdout) == {"lines": ["sān gā'", "saam1 gaap3", "三甲"], "hints": ["三", "甲"]}
   hint_cue = subprocess.run([*session, "eval", "({underline: getComputedStyle(document.querySelector('#pronunciation-result .word-label')).textDecorationLine, icon: getComputedStyle(document.querySelector('#pronunciation-result .word-trigger'), '::after').content, inline: getComputedStyle(document.querySelector('#pronunciation-result .word-trigger'), '::after').display === 'inline-block'})"], capture_output=True, text=True, check=True)
   assert json.loads(hint_cue.stdout) == {"underline": "underline", "icon": '"ⓘ"', "inline": True}
   subprocess.run([*session, "eval", "document.querySelector('#pronunciation-result .word-trigger').click()"], check=True, capture_output=True)
@@ -143,6 +180,31 @@ def test_frontend_interactions() -> None:
   assert len(layout["rows"]) == 2
   assert layout["rows"][0] == layout["rows"][1]
   assert layout["allSingleLine"] is True
+  flashcard_switches = subprocess.run([*session, "eval", "({count: document.querySelectorAll('#flashcard-result .allow-invalid-pinyin').length, belowRows: Array.from(document.querySelectorAll('#flashcard-result .allow-invalid-pinyin')).every(input => Boolean(input.closest('label')?.previousElementSibling?.querySelector('.word-grid'))), unchecked: Array.from(document.querySelectorAll('#flashcard-result .allow-invalid-pinyin')).every(input => !input.checked)})"], capture_output=True, text=True, check=True)
+  assert json.loads(flashcard_switches.stdout) == {"count": 2, "belowRows": True, "unchecked": True}
+  flashcard_default = subprocess.run([*session, "eval", "Array.from(document.querySelectorAll('#flashcard-result .example .approx')).map(node => node.textContent).join(' ').includes('mǔ')"], capture_output=True, text=True, check=True)
+  assert json.loads(flashcard_default.stdout) is True
+  subprocess.run([*session, "eval", "window.__previousFetch = window.fetch; window.__flashcardModes = []; window.fetch = async (input, options) => { if (new URL(input).pathname === '/approx_pinyin') window.__flashcardModes.push(JSON.parse(options.body).allow_invalid_pinyin); return window.__previousFetch(input, options); };"], check=True, capture_output=True)
+  subprocess.run([*session, "eval", "document.querySelector('#flashcard-result .allow-invalid-pinyin').click()"], check=True, capture_output=True)
+  subprocess.run([*session, "wait", "--text", "m̌"], check=True, capture_output=True)
+  flashcard_literal = subprocess.run([*session, "eval", "Array.from(document.querySelectorAll('#flashcard-result .example .approx')).map(node => node.textContent).join(' ').includes('m̌')"], capture_output=True, text=True, check=True)
+  assert json.loads(flashcard_literal.stdout) is True
+  synchronized = subprocess.run([*session, "eval", "Array.from(document.querySelectorAll('.allow-invalid-pinyin')).every(input => input.checked)"], capture_output=True, text=True, check=True)
+  assert json.loads(synchronized.stdout) is True
+  subprocess.run([*session, "eval", "document.querySelectorAll('#flashcard-result .allow-invalid-pinyin')[1].click()"], check=True, capture_output=True)
+  subprocess.run([*session, "wait", "--text", "mǔ"], check=True, capture_output=True)
+  synchronized = subprocess.run([*session, "eval", "Array.from(document.querySelectorAll('.allow-invalid-pinyin')).every(input => !input.checked)"], capture_output=True, text=True, check=True)
+  assert json.loads(synchronized.stdout) is True
+  flashcard_modes = subprocess.run([*session, "eval", "window.__flashcardModes"], capture_output=True, text=True, check=True)
+  assert json.loads(flashcard_modes.stdout) == [True, True, True, False, False, False]
+  subprocess.run([*session, "eval", "window.fetch = window.__previousFetch; delete window.__previousFetch; delete window.__flashcardModes;"], check=True, capture_output=True)
+  # Changing mode while the next card loads must use the new mode for its readings.
+  subprocess.run([*session, "eval", "window.__previousFetch = window.fetch; window.fetch = async (input, options) => { if (new URL(input).pathname === '/word') await new Promise(resolve => setTimeout(resolve, 100)); return window.__previousFetch(input, options); }; document.querySelector('#next-word').click(); document.querySelector('#allow-invalid-pinyin').click();"], check=True, capture_output=True)
+  subprocess.run([*session, "wait", "#flashcard-result .example .approx"], check=True, capture_output=True)
+  loading_mode = subprocess.run([*session, "eval", "Array.from(document.querySelectorAll('#flashcard-result .example .approx')).map(node => node.textContent).join(' ').includes('m̌')"], capture_output=True, text=True, check=True)
+  assert json.loads(loading_mode.stdout) is True
+  subprocess.run([*session, "eval", "window.fetch = window.__previousFetch; delete window.__previousFetch; document.querySelector('#allow-invalid-pinyin').click();"], check=True, capture_output=True)
+  subprocess.run([*session, "wait", "--text", "mǔ"], check=True, capture_output=True)
   subprocess.run([*session, "eval", "window.fetch = window.__originalFetch; delete window.__originalFetch;"], check=True, capture_output=True)
 
   subprocess.run([*session, "set", "viewport", "390", "844"], check=True, capture_output=True)
@@ -150,6 +212,8 @@ def test_frontend_interactions() -> None:
   subprocess.run([*session, "wait", "#pronunciation-result .word-card"], check=True, capture_output=True)
   mobile = subprocess.run([*session, "eval", "({horizontal: getComputedStyle(document.querySelector('#pronunciation-result .word-grid')).overflowX === 'auto', scrolling: document.querySelector('#pronunciation-result .word-grid').scrollWidth > document.querySelector('#pronunciation-result .word-grid').clientWidth, noVerticalScroll: document.querySelector('#pronunciation-result .word-grid').scrollHeight === document.querySelector('#pronunciation-result .word-grid').clientHeight, noPageOverflow: document.documentElement.scrollWidth <= innerWidth})"], capture_output=True, text=True, check=True)
   assert json.loads(mobile.stdout) == {"horizontal": True, "scrolling": True, "noVerticalScroll": True, "noPageOverflow": True}
+  touch_targets = subprocess.run([*session, "eval", "({grid: getComputedStyle(document.querySelector('#pronunciation-result .word-grid')).touchAction, text: getComputedStyle(document.querySelector('#pronunciation-result .word-card .word-label')).touchAction, control: getComputedStyle(document.querySelector('#pronunciation-result .word-trigger')).touchAction})"], capture_output=True, text=True, check=True)
+  assert json.loads(touch_targets.stdout) == {"grid": "pan-x pan-y", "text": "auto", "control": "auto"}
   subprocess.run([*session, "eval", "document.querySelector('#sidebar-toggle').click()"], check=True, capture_output=True)
   opened = subprocess.run([*session, "eval", "document.querySelector('#sidebar-toggle').getAttribute('aria-expanded')"], capture_output=True, text=True, check=True)
   assert json.loads(opened.stdout) == "true"
@@ -174,7 +238,7 @@ def test_frontend_interactions() -> None:
   # Both local path forms must keep each API endpoint under the configured path.
   for path in ("/api", "./api"):
     subprocess.run([*session, "network", "route", "**/config.js", "--body", (
-      f"window.CANTONESE_TUTOR_CONFIG = {{ apiBaseUrl: '{path}' }};"
+      f"window.YUE2PINYIN_CONFIG = {{ apiBaseUrl: '{path}' }};"
     )], check=True, capture_output=True)
     subprocess.run([*session, "open", base_url], check=True, capture_output=True)
     enabled = subprocess.run([*session, "eval", "!document.querySelector('#analyze-button').disabled && !document.querySelector('#next-word').disabled"], capture_output=True, text=True, check=True)
@@ -198,7 +262,7 @@ def test_frontend_interactions() -> None:
                 "https:invalid.example/api", "https://user:pass@invalid.example/api",
                 "/api?token=abc", "/api#fragment", "http://[", ""):
     subprocess.run([*session, "network", "route", "**/config.js", "--body", (
-      f"window.CANTONESE_TUTOR_CONFIG = {{ apiBaseUrl: {json.dumps(value)} }};"
+      f"window.YUE2PINYIN_CONFIG = {{ apiBaseUrl: {json.dumps(value)} }};"
     )], check=True, capture_output=True)
     subprocess.run([*session, "open", base_url], check=True, capture_output=True)
     subprocess.run([*session, "wait", "--text", "API 網址設定無效"], check=True, capture_output=True)

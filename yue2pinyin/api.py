@@ -15,8 +15,8 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from yue2pinyin.approximation import approximate
 from yue2pinyin.contracts import (
-  ApproximationValue, ApproxPinyinResponse, DirectApproxPinyinResponse, JyutpinRequest,
-  JyutpinResponse, JyutpinValue, TextRequest, WordEntry,
+  ApproximationValue, ApproxJyutpinRequest, ApproxPinyinResponse, ApproxTextRequest,
+  DirectApproxPinyinResponse, JyutpinResponse, JyutpinValue, TextRequest, WordEntry,
 )
 from yue2pinyin.trie import PronunciationTrie
 
@@ -166,9 +166,9 @@ async def jyutpin(payload: TextRequest, request: Request) -> JyutpinResponse:
 
 @app.post("/approx_pinyin", response_model=ApproxPinyinResponse | DirectApproxPinyinResponse)
 async def approx_pinyin(
-  payload: TextRequest | JyutpinRequest, request: Request,
+  payload: ApproxTextRequest | ApproxJyutpinRequest, request: Request,
 ) -> ApproxPinyinResponse | DirectApproxPinyinResponse:
-  if isinstance(payload, JyutpinRequest):
+  if isinstance(payload, ApproxJyutpinRequest):
     normalized: list[JyutpinValue] = []
     converted: list[ApproximationValue] = []
     hints: list[ApproximationValue] = []
@@ -184,20 +184,21 @@ async def approx_pinyin(
         hints.append(None)
       elif isinstance(reading, list) or len(syllables) > 1:
         normalized.append(syllables)
-        approximations = [approximate(syllable) for syllable in syllables]
+        approximations = [approximate(syllable, payload.allow_invalid_pinyin) for syllable in syllables]
         converted.append([item[0] for item in approximations])
         hints.append([item[1] for item in approximations])
       else:
         normalized.append(reading)
-        approximation, hint = approximate(syllables[0])
+        approximation, hint = approximate(syllables[0], payload.allow_invalid_pinyin)
         converted.append(approximation)
         hints.append(hint)
     return DirectApproxPinyinResponse(jyutpin=normalized, approx_pinyin=converted, hint=hints)
 
-  cache: OrderedDict[str, ApproxPinyinResponse] = request.app.state.approx_pinyin_cache
-  cached = cache.get(payload.text)
+  cache: OrderedDict[tuple[str, bool], ApproxPinyinResponse] = request.app.state.approx_pinyin_cache
+  cache_key = (payload.text, payload.allow_invalid_pinyin)
+  cached = cache.get(cache_key)
   if cached is not None:
-    cache.move_to_end(payload.text)
+    cache.move_to_end(cache_key)
     return cached.model_copy(deep=True)
 
   # Approximation reuses the Jyutpin cache, including entries from its own prior misses.
@@ -223,10 +224,10 @@ async def approx_pinyin(
     if reading is None:
       converted.append((None, None))
     elif isinstance(reading, list):
-      approximations = [approximate(syllable) for syllable in reading]
+      approximations = [approximate(syllable, payload.allow_invalid_pinyin) for syllable in reading]
       converted.append(([item[0] for item in approximations], [item[1] for item in approximations]))
     else:
-      converted.append(approximate(reading))
+      converted.append(approximate(reading, payload.allow_invalid_pinyin))
   per_unit = [item[0] for item in converted]
   grouped: list[ApproximationValue] = []
   offset = 0
@@ -257,7 +258,7 @@ async def approx_pinyin(
     approx_pinyin_words=grouped,
     hint=[item[1] for item in converted],
   )
-  cache[payload.text] = result.model_copy(deep=True)
+  cache[cache_key] = result.model_copy(deep=True)
   if len(cache) > QUERY_CACHE_SIZE:
     cache.popitem(last=False)
   return result

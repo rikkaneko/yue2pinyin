@@ -126,6 +126,7 @@ def test_flashcard_readings_and_direct_jyutpin(tmp_path: Path, monkeypatch: Monk
     assert partial["hint"] == [["聲門開啟，喉部送氣", None], None, "聲門開啟，喉部送氣"]
 
     direct = client.post("/approx_pinyin", json={
+      "allow_invalid_pinyin": True,
       "jyutpin": ["nei5", "haa1 lou3", ["so1", "wi4"], ["haa1"], None, "", "xyz1", "haa1 xyz1"],
     })
     assert direct.status_code == 200
@@ -138,6 +139,17 @@ def test_flashcard_readings_and_direct_jyutpin(tmp_path: Path, monkeypatch: Monk
     assert client.post("/approx_pinyin", json={"jyutpin": []}).json() == {
       "jyutpin": [], "approx_pinyin": [], "hint": [],
     }
+    valid = client.post("/approx_pinyin", json={"jyutpin": ["m4", "biu1", "goek3", "bad9"]}).json()
+    assert valid["approx_pinyin"] == ["mu3", "biao1", "gao'1", None]
+    literal = client.post("/approx_pinyin", json={
+      "jyutpin": ["m4", "biu1", "goek3", "bad9"], "allow_invalid_pinyin": True,
+    }).json()
+    assert literal["approx_pinyin"] == ["m3", "biu1", "giao'1", None]
+    assert valid["hint"] == literal["hint"]
+    for value in ("true", 1, None, [], {}):
+      assert client.post("/approx_pinyin", json={"text": "你好", "allow_invalid_pinyin": value}).status_code == 422
+      assert client.post("/approx_pinyin", json={"jyutpin": ["m4"], "allow_invalid_pinyin": value}).status_code == 422
+    assert client.post("/jyutpin", json={"text": "你好", "allow_invalid_pinyin": True}).status_code == 422
     for malformed in ({"text": "你好", "jyutpin": ["nei5"]}, {"jyutpin": "nei5"},
                       {"jyutpin": [5]}, {"jyutpin": [[5]]}, {"jyutpin": ["nei5"], "extra": True}):
       assert client.post("/approx_pinyin", json=malformed).status_code == 422

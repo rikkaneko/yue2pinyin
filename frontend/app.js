@@ -2,7 +2,7 @@ import { z } from 'https://cdn.jsdelivr.net/npm/zod@4.4.3/+esm';
 
 const $ = window.jQuery;
 const configSchema = z.object({ apiBaseUrl: z.string().trim().min(1) });
-const parsedConfig = configSchema.safeParse(window.CANTONESE_TUTOR_CONFIG);
+const parsedConfig = configSchema.safeParse(window.YUE2PINYIN_CONFIG);
 let apiBaseUrl = null;
 const configuredUrl = parsedConfig.success ? parsedConfig.data.apiBaseUrl : '';
 const fullUrl = /^https?:\/\//i.test(configuredUrl);
@@ -21,7 +21,7 @@ if (parsedConfig.success && (fullUrl || relativePath)) {
   }
 }
 
-const textSchema = z.object({ text: z.string().trim().min(1).max(2000) });
+const textSchema = z.object({ text: z.string().trim().min(1).max(2000), allow_invalid_pinyin: z.boolean() });
 const exampleSentences = [
   '你好，今日天氣點呀？',
   '唔該，幾多錢？',
@@ -78,6 +78,26 @@ const wordSchema = z.object({
   reviewed: z.number().int(),
 }).passthrough();
 
+// Convert numbered API readings only at the presentation boundary. The API
+// keeps digits so clients can still distinguish tone and checked-stop markers.
+function markTone(reading) {
+  const marks = {
+    a: 'āáǎà', e: 'ēéěè', i: 'īíǐì', o: 'ōóǒò',
+    u: 'ūúǔù', ü: 'ǖǘǚǜ', m: ['m̄', 'ḿ', 'm̌', 'm̀'],
+  };
+  return reading.replace(/([a-zü]+)'?([1-4])/g, (syllable, letters, tone) => {
+    const target = ['a', 'o', 'e'].find((vowel) => letters.includes(vowel));
+    const index = target ? letters.indexOf(target) : Math.max(letters.lastIndexOf('i'), letters.lastIndexOf('u'), letters.lastIndexOf('ü'));
+    const position = index < 0 && letters === 'm' ? 0 : index;
+    if (position < 0) {
+      return syllable;
+    }
+    const vowel = letters[position];
+    const marked = marks[vowel][Number(tone) - 1];
+    return `${letters.slice(0, position)}${marked}${letters.slice(position + 1)}${syllable.includes("'") ? "'" : ''}`.normalize('NFC');
+  });
+}
+
 // The same grouped rendering is used for free text, a headword, and each example.
 function renderPronunciation(result) {
   const grid = $('<div class="word-grid d-flex flex-nowrap align-items-start gap-2 border rounded-3 p-3" tabindex="0" aria-label="發音分析字詞"></div>');
@@ -99,12 +119,12 @@ function renderPronunciation(result) {
         unitHint.forEach((hint, syllableIndex) => {
           if (hint) {
             const approximation = Array.isArray(unitApprox) ? unitApprox[syllableIndex] : unitApprox;
-            hints.push({ character: latinUnit ? approximation || unit : unit, text: hint });
+            hints.push({ character: latinUnit ? (approximation ? markTone(approximation) : unit) : unit, text: hint });
           }
         });
       } else if (unitHint) {
         const approximation = Array.isArray(unitApprox) ? unitApprox[0] : unitApprox;
-        hints.push({ character: latinUnit ? approximation || unit : unit, text: unitHint });
+        hints.push({ character: latinUnit ? (approximation ? markTone(approximation) : unit) : unit, text: unitHint });
       }
       remaining = remaining.slice(unit.length);
       offset += 1;
@@ -128,7 +148,7 @@ function renderPronunciation(result) {
     const displayedApprox = Array.isArray(approx) ? approx.filter(Boolean).join(' ') : approx;
     if (displayedJyutpin?.trim()) {
       if (displayedApprox?.trim()) {
-        card.append($('<span class="approx small text-primary fw-semibold"></span>').text(displayedApprox));
+        card.append($('<span class="approx small text-primary fw-semibold"></span>').text(markTone(displayedApprox)));
       }
       card.append($('<span class="jyutpin small text-body-secondary"></span>').text(displayedJyutpin));
     }
@@ -156,8 +176,8 @@ function renderPronunciation(result) {
 }
 
 // Validate each pronunciation response before using its parallel arrays in the UI.
-async function requestApproximation(text) {
-  const payload = textSchema.parse({ text });
+async function requestApproximation(text, allowInvalid) {
+  const payload = textSchema.parse({ text, allow_invalid_pinyin: allowInvalid });
   const response = await fetch(new URL('approx_pinyin', apiBaseUrl), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -171,6 +191,10 @@ async function requestApproximation(text) {
 
 $(function () {
   let flashcardLoaded = false;
+  let lastAnalyzedText = null;
+  let analysisVersion = 0;
+  let currentFlashcardTargets = [];
+  let readingsVersion = 0;
   const example = exampleSentences[Math.floor(Math.random() * exampleSentences.length)];
   $('#cantonese-input').attr('placeholder', example);
   let pressTimer = null;
@@ -206,29 +230,81 @@ $(function () {
     $('#speak-input').prop('disabled', !$(this).val().trim());
   });
 
+  $(document).on('change', '.allow-invalid-pinyin', async function () {
+    const allowInvalid = this.checked;
+    // The mode is shared even when one view or a flashcard row is hidden.
+    $('.allow-invalid-pinyin').prop('checked', allowInvalid);
+    const currentAnalysis = ++analysisVersion;
+    const currentReadings = ++readingsVersion;
+    const targets = currentFlashcardTargets;
+    targets.forEach(({ slot }) => slot.empty().removeClass('placeholder'));
+    const readingsPromise = targets.length && apiBaseUrl
+      ? Promise.allSettled(targets.map(async ({ text }) => requestApproximation(text, allowInvalid))) : null;
+    if (lastAnalyzedText && apiBaseUrl) {
+      const status = $('#pronunciation-status').removeClass('error').text('正在分析發音…');
+      $('#pronunciation-result').empty();
+      try {
+        const result = await requestApproximation(lastAnalyzedText, allowInvalid);
+        if (currentAnalysis === analysisVersion) {
+          $('#pronunciation-result').append($('<h2 class="h5 fw-bold mb-3">發音分析</h2>'), renderPronunciation(result));
+          status.text('');
+        }
+      } catch (error) {
+        if (currentAnalysis === analysisVersion) {
+          status.addClass('error').text('暫時無法分析發音，請稍後再試。');
+        }
+      }
+    }
+    if (readingsPromise) {
+      const outcomes = await readingsPromise;
+      if (currentReadings !== readingsVersion) {
+        return;
+      }
+      let failed = false;
+      outcomes.forEach((outcome, index) => {
+        if (outcome.status === 'fulfilled') {
+          targets[index].slot.append(renderPronunciation(outcome.value));
+        } else {
+          failed = true;
+          targets[index].slot.addClass('placeholder').text('暫時無法載入讀音。');
+        }
+      });
+      $('#flashcard-status').toggleClass('error', failed).text(failed ? '部分讀音暫時無法載入。' : '');
+    }
+  });
+
   $('#analyze-button').on('click', async function () {
     const status = $('#pronunciation-status').removeClass('error');
     const entered = String($('#cantonese-input').val());
     const text = entered.trim() ? entered : example;
-    if (!textSchema.safeParse({ text }).success) {
+    const allowInvalid = $('#allow-invalid-pinyin').prop('checked');
+    if (!textSchema.safeParse({ text, allow_invalid_pinyin: allowInvalid }).success) {
       status.addClass('error').text('請輸入 1 至 2000 個字元嘅廣東話文字。');
       return;
     }
     $(this).prop('disabled', true);
+    lastAnalyzedText = text;
+    const currentAnalysis = ++analysisVersion;
     status.text('正在分析發音…');
     $('#pronunciation-result').empty();
     try {
-      const result = await requestApproximation(text);
-      $('#pronunciation-result').append($('<h2 class="h5 fw-bold mb-3">發音分析</h2>'), renderPronunciation(result));
-      status.text('');
+      const result = await requestApproximation(text, allowInvalid);
+      if (currentAnalysis === analysisVersion) {
+        $('#pronunciation-result').append($('<h2 class="h5 fw-bold mb-3">發音分析</h2>'), renderPronunciation(result));
+        status.text('');
+      }
     } catch (error) {
-      status.addClass('error').text('暫時無法分析發音，請稍後再試。');
+      if (currentAnalysis === analysisVersion) {
+        status.addClass('error').text('暫時無法分析發音，請稍後再試。');
+      }
     } finally {
       $(this).prop('disabled', false);
     }
   });
 
   $('#next-word').on('click', async function () {
+    readingsVersion += 1;
+    currentFlashcardTargets = [];
     const status = $('#flashcard-status').removeClass('error').text('正在抽取詞語卡…');
     const result = $('#flashcard-result').empty();
     $(this).prop('disabled', true);
@@ -349,9 +425,22 @@ $(function () {
       });
       body.append(definitions);
       result.append(card);
+      currentFlashcardTargets = targets;
+      targets.forEach(({ slot }) => {
+        slot.after($('<label class="form-check mt-3"></label>').append(
+          $('<input class="form-check-input allow-invalid-pinyin" type="checkbox">')
+            .prop('checked', $('#allow-invalid-pinyin').prop('checked')),
+          $('<span class="form-check-label"></span>').text('允許非標準拼音（更接近粵拼）'),
+        ));
+      });
 
       // A record remains readable even if one pronunciation request fails.
-      const pronunciations = await Promise.allSettled(targets.map(async ({ text }) => requestApproximation(text)));
+      const currentReadings = readingsVersion;
+      const allowInvalid = $('#allow-invalid-pinyin').prop('checked');
+      const pronunciations = await Promise.allSettled(targets.map(async ({ text }) => requestApproximation(text, allowInvalid)));
+      if (currentReadings !== readingsVersion) {
+        return;
+      }
       let failed = false;
       pronunciations.forEach((outcome, index) => {
         if (outcome.status === 'fulfilled') {

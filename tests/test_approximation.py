@@ -1,6 +1,6 @@
 import pytest
 
-from yue2pinyin.approximation import approximate
+from yue2pinyin.approximation import FINAL_MAP, INITIALS, VALID_SYLLABLES, approximate
 
 
 # Each expectation is the first sound entry in the proofread final table.
@@ -24,7 +24,7 @@ from yue2pinyin.approximation import approximate
   ],
 )
 def test_proofread_final_defaults(final: str, expected: str) -> None:
-  assert approximate(f"{final}1")[0] == f"{expected}1"
+  assert approximate(f"{final}1", True)[0] == f"{expected}1"
 
 
 @pytest.mark.parametrize(
@@ -43,7 +43,7 @@ def test_proofread_final_defaults(final: str, expected: str) -> None:
 )
 def test_checked_final_strips_coda_and_marks_cutoff(final: str, vowel: str, stop_action: str) -> None:
   for source_tone, target_tone in (("3", "1"), ("6", "4")):
-    approximation, hint = approximate(f"{final}{source_tone}")
+    approximation, hint = approximate(f"{final}{source_tone}", True)
     assert approximation == f"{vowel}'{target_tone}"
     assert hint is not None
     assert "短促中斷" in hint
@@ -59,12 +59,12 @@ def test_checked_final_strips_coda_and_marks_cutoff(final: str, vowel: str, stop
   ],
 )
 def test_diphthong_rule_defaults(final: str, expected: str) -> None:
-  assert approximate(f"{final}2")[0] == f"{expected}2"
+  assert approximate(f"{final}2", True)[0] == f"{expected}2"
 
 
 @pytest.mark.parametrize("final", ("aam", "am", "em", "im"))
 def test_bilabial_nasal_final_keeps_closed_lip_hint(final: str) -> None:
-  hint = approximate(f"{final}1")[1]
+  hint = approximate(f"{final}1", True)[1]
   assert hint is not None
   assert "韻尾雙唇緊閉，鼻腔出氣" in hint
 
@@ -87,13 +87,13 @@ def test_bilabial_nasal_final_keeps_closed_lip_hint(final: str) -> None:
   ],
 )
 def test_initials_tones_and_literal_join(jyutpin: str, expected: str) -> None:
-  assert approximate(jyutpin)[0] == expected
+  assert approximate(jyutpin, True)[0] == expected
 
 
 def test_ambiguous_lexical_examples_use_sound_defaults() -> None:
-  assert approximate("si1")[0] == "xi1"
-  assert approximate("bun6")[0] == "bun4"
-  assert approximate("faan6")[0] == "fan4"
+  assert approximate("si1", True)[0] == "xi1"
+  assert approximate("bun6", True)[0] == "bun4"
+  assert approximate("faan6", True)[0] == "fan4"
 
 
 @pytest.mark.parametrize(
@@ -113,7 +113,7 @@ def test_ambiguous_lexical_examples_use_sound_defaults() -> None:
   ],
 )
 def test_action_hints(syllable: str, cues: tuple[str, ...]) -> None:
-  hint = approximate(syllable)[1]
+  hint = approximate(syllable, True)[1]
   assert hint is not None
   assert all(cue in hint for cue in cues)
 
@@ -124,4 +124,27 @@ def test_unknown_or_malformed_syllable(syllable: str) -> None:
 
 
 def test_plain_syllable_has_empty_hint() -> None:
-  assert approximate("baa1")[1] == ""
+  assert approximate("baa1", True)[1] == ""
+
+
+@pytest.mark.parametrize(
+  ("jyutpin", "valid", "literal"),
+  [
+    ("m4", "mu3", "m3"), ("biu1", "biao1", "biu1"),
+    ("goek3", "gao'1", "giao'1"), ("syut3", "xue'1", "xue'1"),
+    ("ai1", "yi1", "i1"), ("jyu1", "yu1", "yu1"),
+  ],
+)
+def test_valid_and_literal_modes(jyutpin: str, valid: str, literal: str) -> None:
+  assert approximate(jyutpin)[0] == valid
+  assert approximate(jyutpin, False)[0] == valid
+  assert approximate(jyutpin, True)[0] == literal
+  assert approximate(jyutpin)[1] == approximate(jyutpin, True)[1]
+
+
+def test_all_mapped_syllables_have_valid_bases_by_default() -> None:
+  for initial in ("", *INITIALS):
+    for final in FINAL_MAP:
+      output, _ = approximate(f"{initial}{final}1")
+      assert output is not None
+      assert output[:-1].replace("'", "") in VALID_SYLLABLES

@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from pytest import MonkeyPatch
 
 from yue2pinyin import api
-from yue2pinyin.contracts import TextRequest
+from yue2pinyin.contracts import ApproxTextRequest, TextRequest
 
 
 BUILD_SCRIPT = Path(__file__).resolve().parents[1] / "scripts/build_flashcard_db.py"
@@ -19,7 +19,7 @@ BUILD_SCRIPT = Path(__file__).resolve().parents[1] / "scripts/build_flashcard_db
 def test_query_results_reuse_jyutpin_and_approximation(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
   words = tmp_path / "words.csv"
   characters = tmp_path / "characters.json"
-  words.write_text("words,jyutpin\n你好,nei5 hou2\n", encoding="utf-8")
+  words.write_text("words,jyutpin\n你好,nei5 hou2\n表,biu2\n", encoding="utf-8")
   characters.write_text(json.dumps({"你": {"nei5": 1}}), encoding="utf-8")
   monkeypatch.setenv("YUE2PINYIN_WORDS_PATH", str(words))
   monkeypatch.setenv("YUE2PINYIN_CHARACTERS_PATH", str(characters))
@@ -41,7 +41,12 @@ def test_query_results_reuse_jyutpin_and_approximation(tmp_path: Path, monkeypat
         assert lookup.call_count == 1
         assert convert.call_count == 2
         assert list(api.app.state.jyutpin_cache) == ["你好"]
-        assert list(api.app.state.approx_pinyin_cache) == ["你好"]
+        assert list(api.app.state.approx_pinyin_cache) == [("你好", False)]
+        literal = client.post("/approx_pinyin", json={"text": "你好", "allow_invalid_pinyin": True}).json()
+        assert list(api.app.state.approx_pinyin_cache) == [("你好", False), ("你好", True)]
+        assert literal["jyutpin"] == first_approx["jyutpin"]
+        assert lookup.call_count == 1
+        assert convert.call_count == 4
 
         # An approximate-pinyin first request also populates the Jyutpin cache.
         client.post("/approx_pinyin", json={"text": "你"})
@@ -58,10 +63,17 @@ def test_query_results_reuse_jyutpin_and_approximation(tmp_path: Path, monkeypat
         request = Request({"type": "http", "app": api.app})
         jyutpin_result = asyncio.run(api.jyutpin(TextRequest(text="你好"), request))
         jyutpin_result.jyutpin[0] = "changed"
-        approx_result = asyncio.run(api.approx_pinyin(TextRequest(text="你好"), request))
+        approx_result = asyncio.run(api.approx_pinyin(ApproxTextRequest(text="你好"), request))
         approx_result.jyutpin[0] = "changed"
         assert asyncio.run(api.jyutpin(TextRequest(text="你好"), request)).jyutpin == ["nei5", "hou2"]
-        assert asyncio.run(api.approx_pinyin(TextRequest(text="你好"), request)).jyutpin == ["nei5", "hou2"]
+        assert asyncio.run(api.approx_pinyin(ApproxTextRequest(text="你好"), request)).jyutpin == ["nei5", "hou2"]
+        valid_word = client.post("/approx_pinyin", json={"text": "表"}).json()
+        literal_word = client.post("/approx_pinyin", json={"text": "表", "allow_invalid_pinyin": True}).json()
+        assert valid_word["approx_pinyin"] == ["biao2"]
+        assert valid_word["approx_pinyin_words"] == ["biao2"]
+        assert literal_word["approx_pinyin"] == ["biu2"]
+        assert literal_word["approx_pinyin_words"] == ["biu2"]
+        assert valid_word["hint"] == literal_word["hint"]
 
 
 def test_independent_lru_eviction_and_lifespan_reset(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
@@ -87,7 +99,7 @@ def test_independent_lru_eviction_and_lifespan_reset(tmp_path: Path, monkeypatch
       assert list(api.app.state.jyutpin_cache) == ["甲", "丙"]
       for text in ("甲", "乙", "甲", "丙"):
         assert client.post("/approx_pinyin", json={"text": text}).status_code == 200
-      assert list(api.app.state.approx_pinyin_cache) == ["甲", "丙"]
+      assert list(api.app.state.approx_pinyin_cache) == [("甲", False), ("丙", False)]
       assert list(api.app.state.jyutpin_cache) == ["乙", "丙"]
       assert lookup.call_count == 5
 

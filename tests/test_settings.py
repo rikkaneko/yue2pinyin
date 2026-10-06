@@ -53,7 +53,7 @@ def test_environment_override_and_missing_dotenv(tmp_path: Path, monkeypatch: Mo
   empty_directory = tmp_path / "no-env"
   empty_directory.mkdir()
   monkeypatch.chdir(empty_directory)
-  monkeypatch.setenv("CANTONESE_TUTOR_WORDS_PATH", "legacy.csv")
+  monkeypatch.setenv("YUE2PINYIN_WORDS_PATH", "legacy.csv")
   defaults = Settings(_env_file=Path.cwd() / ".env")
   assert defaults.words_path == PROJECT_ROOT / "assests/rime-cantonese/jyut6ping3.words.dict.csv"
   assert defaults.characters_path == PROJECT_ROOT / "assests/words-hk/charlist.json"

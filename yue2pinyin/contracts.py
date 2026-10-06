@@ -2,7 +2,7 @@
 
 from typing import TypeAlias
 
-from pydantic import BaseModel, ConfigDict, StrictStr
+from pydantic import BaseModel, ConfigDict, StrictBool, StrictStr
 
 
 JyutpinValue: TypeAlias = str | list[str] | None
@@ -15,10 +15,18 @@ class TextRequest(BaseModel):
   text: StrictStr
 
 
+class ApproxTextRequest(TextRequest):
+  allow_invalid_pinyin: StrictBool = False
+
+
 class JyutpinRequest(BaseModel):
   model_config = ConfigDict(extra="forbid")
 
   jyutpin: list[StrictStr | list[StrictStr] | None]
+
+
+class ApproxJyutpinRequest(JyutpinRequest):
+  allow_invalid_pinyin: StrictBool = False
 
 
 class JyutpinResponse(BaseModel):
